@@ -134,7 +134,7 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
 
         final IllegalArgumentException e = expectThrows(
             IllegalArgumentException.class,
-            () -> blobContainer.executeSingleUpload(blobStore, randomAlphaOfLengthBetween(1, 10), null, blobSize, null)
+            () -> blobContainer.executeSingleUpload(blobStore, randomAlphaOfLengthBetween(1, 10), null, blobSize, null, null, null)
         );
         assertEquals("Upload request size [" + blobSize + "] can't be larger than 5gb", e.getMessage());
     }
@@ -153,8 +153,8 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
                 blobName,
                 new ByteArrayInputStream(new byte[0]),
                 ByteSizeUnit.MB.toBytes(2),
-                null
-            )
+                null,
+                null, null)
         );
         assertEquals("Upload request size [2097152] can't be larger than buffer size", e.getMessage());
     }
@@ -665,7 +665,7 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
         when(client.putObject(putReqCaptor.capture(), bodyCaptor.capture())).thenReturn(PutObjectResponse.builder().build());
 
         // Pass the known-length stream + tell the code the exact size
-        blobContainer.executeSingleUpload(blobStore, blobName, inputStream, blobSize, metadata);
+        blobContainer.executeSingleUpload(blobStore, blobName, inputStream, blobSize, metadata, null, null);
 
         final PutObjectRequest request = putReqCaptor.getValue();
         final RequestBody requestBody = bodyCaptor.getValue();
@@ -703,7 +703,7 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
 
         final IllegalArgumentException e = expectThrows(
             IllegalArgumentException.class,
-            () -> blobContainer.executeMultipartUpload(blobStore, randomAlphaOfLengthBetween(1, 10), null, blobSize, null)
+            () -> blobContainer.executeMultipartUpload(blobStore, randomAlphaOfLengthBetween(1, 10), null, blobSize, null, null, null)
         );
         assertEquals("Multipart upload request size [" + blobSize + "] can't be larger than 5tb", e.getMessage());
     }
@@ -715,7 +715,7 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
 
         final IllegalArgumentException e = expectThrows(
             IllegalArgumentException.class,
-            () -> blobContainer.executeMultipartUpload(blobStore, randomAlphaOfLengthBetween(1, 10), null, blobSize, null)
+            () -> blobContainer.executeMultipartUpload(blobStore, randomAlphaOfLengthBetween(1, 10), null, blobSize, null, null, null)
         );
         assertEquals("Multipart upload request size [" + blobSize + "] can't be smaller than 5mb", e.getMessage());
     }
@@ -803,7 +803,7 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
 
         final ByteArrayInputStream inputStream = new ByteArrayInputStream(new byte[0]);
         final S3BlobContainer blobContainer = new S3BlobContainer(blobPath, blobStore);
-        blobContainer.executeMultipartUpload(blobStore, blobName, inputStream, blobSize, metadata);
+        blobContainer.executeMultipartUpload(blobStore, blobName, inputStream, blobSize, metadata, null, null);
 
         final CreateMultipartUploadRequest initRequest = createMultipartUploadRequestArgumentCaptor.getValue();
         assertEquals(bucketName, initRequest.bucket());
@@ -933,7 +933,7 @@ public class S3BlobStoreContainerTests extends OpenSearchTestCase {
 
         final IOException e = expectThrows(IOException.class, () -> {
             final S3BlobContainer blobContainer = new S3BlobContainer(blobPath, blobStore);
-            blobContainer.executeMultipartUpload(blobStore, blobName, new ByteArrayInputStream(new byte[0]), blobSize, null);
+            blobContainer.executeMultipartUpload(blobStore, blobName, new ByteArrayInputStream(new byte[0]), blobSize, null, null, null);
         });
 
         assertEquals("Unable to upload object [" + blobName + "] using multipart upload", e.getMessage());

@@ -8,11 +8,14 @@
 
 package org.opensearch.common.blobstore;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.cluster.metadata.CryptoMetadata;
 import org.opensearch.cluster.metadata.RepositoryMetadata;
 import org.opensearch.common.crypto.CryptoHandler;
 import org.opensearch.crypto.CryptoHandlerRegistry;
 import org.opensearch.crypto.CryptoRegistryException;
+import org.opensearch.repositories.blobstore.BlobStoreRepository;
 
 import java.io.IOException;
 import java.util.Map;
@@ -25,8 +28,11 @@ import java.util.Map;
  */
 public class EncryptedBlobStore implements BlobStore {
 
+    private static final Logger logger = LogManager.getLogger(EncryptedBlobStore.class);
+
     private final BlobStore blobStore;
     private final CryptoHandler<?, ?> cryptoHandler;
+    private final CryptoMetadata repositoryCryptoMetadata;  // Store for merging with index metadata
 
     /**
      * Constructs an EncryptedBlobStore that wraps the provided BlobStore with encryption capabilities based on the
@@ -48,6 +54,7 @@ public class EncryptedBlobStore implements BlobStore {
             );
         }
         this.blobStore = blobStore;
+        this.repositoryCryptoMetadata = cryptoMetadata;
     }
 
     /**
@@ -59,11 +66,30 @@ public class EncryptedBlobStore implements BlobStore {
      */
     @Override
     public BlobContainer blobContainer(BlobPath path) {
+        logger.info("inside blobContainer for cluster level with path = {}", path);
         BlobContainer blobContainer = blobStore.blobContainer(path);
         if (blobContainer instanceof AsyncMultiStreamBlobContainer) {
             return new AsyncMultiStreamEncryptedBlobContainer<>((AsyncMultiStreamBlobContainer) blobContainer, cryptoHandler);
         }
         return new EncryptedBlobContainer<>(blobContainer, cryptoHandler);
+    }
+
+    // overloadded method to get blob container with the new crypto metadata
+    public BlobContainer blobContainer(BlobPath path, CryptoMetadata cryptoMetadata) {
+        logger.info("inside blobContainer for index level with path = {}, cryptoMetadata = {}", path, cryptoMetadata);
+        
+        // Merge index metadata with repository metadata for context merging
+        CryptoMetadata merged = (cryptoMetadata != null) ? mergeCryptoMetadata(cryptoMetadata) : this.repositoryCryptoMetadata;
+        
+        CryptoHandlerRegistry cryptoHandlerRegistry = CryptoHandlerRegistry.getInstance();
+        assert cryptoHandlerRegistry != null : "CryptoManagerRegistry is not initialized";
+        CryptoHandler IndexCryptoHandler = cryptoHandlerRegistry.fetchCryptoHandler(merged);
+
+        BlobContainer blobContainer = blobStore.blobContainer(path);
+        if (blobContainer instanceof AsyncMultiStreamBlobContainer) {
+            return new AsyncMultiStreamEncryptedBlobContainer<>((AsyncMultiStreamBlobContainer) blobContainer, IndexCryptoHandler);
+        }
+        return new EncryptedBlobContainer<>(blobContainer, IndexCryptoHandler);
     }
 
     /**
@@ -98,6 +124,151 @@ public class EncryptedBlobStore implements BlobStore {
     @Override
     public boolean isBlobMetadataEnabled() {
         return blobStore.isBlobMetadataEnabled();
+    }
+
+    /**
+     * Merges index-level and repository-level CryptoMetadata.
+     * Priority: Index key greater than Repository key
+     * Context: Index context merged with repository context (EncA + EncB)
+     *
+     * @param indexMetadata The index-level CryptoMetadata
+     * @return Merged CryptoMetadata with combined key and context
+     */
+    private CryptoMetadata mergeCryptoMetadata(CryptoMetadata indexMetadata) {
+        // Use index key provider if present, else repository
+        String keyProviderName = (indexMetadata.keyProviderName() != null) 
+            ? indexMetadata.keyProviderName() 
+            : this.repositoryCryptoMetadata.keyProviderName();
+            
+        String keyProviderType = (indexMetadata.keyProviderType() != null)
+            ? indexMetadata.keyProviderType()
+            : this.repositoryCryptoMetadata.keyProviderType();
+        
+        // Merge settings: start with repo, overlay index settings
+        org.opensearch.common.settings.Settings.Builder settingsBuilder = 
+            org.opensearch.common.settings.Settings.builder()
+                .put(this.repositoryCryptoMetadata.settings())
+                .put(indexMetadata.settings());
+        
+        // Merge encryption contexts from settings
+        String indexCtx = indexMetadata.settings().get("kms.encryption_context");
+        String repoCtx = this.repositoryCryptoMetadata.settings().get("kms.encryption_context");
+        
+        logger.info("[CSE-CONTEXT-MERGE] Index context (EncA): {}, Repo context (EncB): {}", indexCtx, repoCtx);
+        
+        if (indexCtx != null && !indexCtx.isEmpty()) {
+            // Convert cryptofs format to JSON if needed
+            String indexJson = indexCtx.trim().startsWith("{") ? indexCtx : cryptofsToJson(indexCtx);
+            logger.info("[CSE-CONTEXT-MERGE] Index context converted to JSON: {}", indexJson);
+            
+            if (repoCtx != null && !repoCtx.isEmpty()) {
+                // Convert repo context to JSON if needed (could be cryptofs format)
+                String repoJson = repoCtx.trim().startsWith("{") ? repoCtx : cryptofsToJson(repoCtx);
+                logger.info("[CSE-CONTEXT-MERGE] Repo context converted to JSON: {}", repoJson);
+                
+                // Merge: repo baseline + index overrides
+                String mergedJson = mergeJson(indexJson, repoJson);
+                logger.info("[CSE-CONTEXT-MERGE] Merged JSON: {}", mergedJson);
+                
+                // Convert back to cryptofs format for KmsService
+                String mergedCryptofs = jsonToCryptofs(mergedJson);
+                logger.info("[CSE-CONTEXT-MERGE] Merged context (EncC) in cryptofs format: {}", mergedCryptofs);
+                settingsBuilder.put("kms.encryption_context", mergedCryptofs);
+            } else {
+                logger.info("[CSE-CONTEXT-MERGE] Using index context only (no repo context)");
+                settingsBuilder.put("kms.encryption_context", indexCtx);  // Keep original format
+            }
+        } else if (repoCtx != null && !repoCtx.isEmpty()) {
+            logger.info("[CSE-CONTEXT-MERGE] Using repo context only (no index context)");
+            settingsBuilder.put("kms.encryption_context", repoCtx);  // Keep original format
+        }
+        
+        logger.info("[CSE-CONTEXT-MERGE] Key provider: name={}, type={}", keyProviderName, keyProviderType);
+        
+        return new CryptoMetadata(keyProviderName, keyProviderType, settingsBuilder.build());
+    }
+
+    /**
+     * Converts cryptofs format to JSON.
+     * Input: "key1=value1,key2=value2"
+     * Output: {"key1":"value1","key2":"value2"}
+     */
+    private String cryptofsToJson(String cryptofs) {
+        StringBuilder sb = new StringBuilder("{");
+        for (String pair : cryptofs.split(",")) {
+            String[] kv = pair.trim().split("=", 2);
+            if (kv.length == 2) {
+                if (sb.length() > 1) sb.append(",");
+                sb.append('"').append(kv[0].trim()).append("\":\"").append(kv[1].trim()).append('"');
+            }
+        }
+        return sb.append("}").toString();
+    }
+
+    /**
+     * Converts JSON format back to cryptofs format.
+     * Input: {"key1":"value1","key2":"value2"}
+     * Output: "key1=value1,key2=value2"
+     */
+    private String jsonToCryptofs(String json) {
+        java.util.Map<String, String> map = new java.util.LinkedHashMap<>();
+        parseSimpleJson(json, map);
+        
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (java.util.Map.Entry<String, String> e : map.entrySet()) {
+            if (!first) sb.append(",");
+            sb.append(e.getKey()).append("=").append(e.getValue());
+            first = false;
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Merges two JSON strings (repo + index).
+     * Repository context provides baseline, index context overrides.
+     */
+    private String mergeJson(String indexJson, String repoJson) {
+        java.util.Map<String, String> map = new java.util.LinkedHashMap<>();
+        
+        // Parse repo first (baseline)
+        parseSimpleJson(repoJson, map);
+        // Parse index second (overrides)
+        parseSimpleJson(indexJson, map);
+        
+        // Build merged JSON
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (java.util.Map.Entry<String, String> e : map.entrySet()) {
+            if (!first) sb.append(",");
+            sb.append('"').append(e.getKey()).append("\":\"").append(e.getValue()).append('"');
+            first = false;
+        }
+        return sb.append("}").toString();
+    }
+
+    /**
+     * Simple JSON parser for string-string maps.
+     * Parses JSON format into Map.
+     */
+    private void parseSimpleJson(String json, java.util.Map<String, String> map) {
+        if (json == null || json.isEmpty()) return;
+        String s = json.trim();
+        if (s.startsWith("{")) s = s.substring(1, s.length() - 1);
+        
+        int i = 0;
+        while (i < s.length()) {
+            int ks = s.indexOf('"', i);
+            if (ks == -1) break;
+            int ke = s.indexOf('"', ks + 1);
+            if (ke == -1) break;
+            int vs = s.indexOf('"', ke + 1);
+            if (vs == -1) break;
+            int ve = s.indexOf('"', vs + 1);
+            if (ve == -1) break;
+            map.put(s.substring(ks + 1, ke), s.substring(vs + 1, ve));
+            i = ve + 1;
+        }
     }
 
     /**

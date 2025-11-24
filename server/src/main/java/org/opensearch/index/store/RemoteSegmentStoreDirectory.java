@@ -596,28 +596,56 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
      * @param src      File to be uploaded
      * @param context  IOContext to be used to open IndexInput of file during remote upload
      * @param listener Listener to handle upload callback events
+     * @param lowPriorityUpload Whether this is a low priority upload
+     * @param cryptoMetadata Optional CryptoMetadata for index-level encryption
      */
-    public void copyFrom(Directory from, String src, IOContext context, ActionListener<Void> listener, boolean lowPriorityUpload) {
+    public void copyFrom(
+        Directory from, 
+        String src, 
+        IOContext context, 
+        ActionListener<Void> listener, 
+        boolean lowPriorityUpload,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
+    ) {
+        logger.info("[CRYPTO] RemoteSegmentStoreDirectory.copyFrom (async): file={}, hasCrypto={}, lowPriority={}", 
+                    src, cryptoMetadata != null, lowPriorityUpload);
+        
         try {
             final String remoteFileName = getNewRemoteSegmentFilename(src);
+            logger.info("[CRYPTO] Generated remote filename: local={}, remote={}", src, remoteFileName);
+            
             boolean uploaded = false;
             if (src.startsWith(IndexFileNames.SEGMENTS) == false) {
+                logger.info("[CRYPTO] File is not segments_N, attempting async upload via remoteDataDirectory");
                 uploaded = remoteDataDirectory.copyFrom(from, src, remoteFileName, context, () -> {
                     try {
+                        logger.info("[CRYPTO] PostUpload callback: Updating cache for file={}", src);
                         postUpload(from, src, remoteFileName, getChecksumOfLocalFile(from, src));
+                        logger.info("[CRYPTO] PostUpload completed successfully for file={}", src);
                     } catch (IOException e) {
+                        logger.error("[CRYPTO] Exception in segment postUpload for file " + src, e);
                         throw new RuntimeException("Exception in segment postUpload for file " + src, e);
                     }
-                }, listener, lowPriorityUpload);
+                }, listener, lowPriorityUpload, cryptoMetadata);
+                logger.info("[CRYPTO] remoteDataDirectory.copyFrom returned uploaded={}", uploaded);
+            } else {
+                logger.info("[CRYPTO] File is segments_N, skipping async upload");
             }
+            
             if (uploaded == false) {
-                copyFrom(from, src, src, context);
+                logger.info("[CRYPTO] Falling back to sync copyFrom for file={}", src);
+                copyFrom(from, src, src, context, cryptoMetadata);
                 listener.onResponse(null);
             }
         } catch (Exception e) {
-            logger.warn(() -> new ParameterizedMessage("Exception while uploading file {} to the remote segment store", src), e);
+            logger.warn(() -> new ParameterizedMessage("[CRYPTO] Exception while uploading file {} to the remote segment store", src), e);
             listener.onFailure(e);
         }
+    }
+    
+    // Backward compatible - delegates to crypto-aware version with null
+    public void copyFrom(Directory from, String src, IOContext context, ActionListener<Void> listener, boolean lowPriorityUpload) {
+        copyFrom(from, src, context, listener, lowPriorityUpload, null);
     }
 
     /**
@@ -703,12 +731,38 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
     /**
      * Copies an existing src file from directory from to a non-existent file dest in this directory.
      * Once the segment is uploaded to remote segment store, update the cache accordingly.
+     * 
+     * @param from Source directory
+     * @param src Source filename
+     * @param dest Destination filename
+     * @param context IOContext
+     * @param cryptoMetadata Optional CryptoMetadata for index-level encryption
      */
+    public void copyFrom(
+        Directory from, 
+        String src, 
+        String dest, 
+        IOContext context,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
+    ) throws IOException {
+        logger.info("[CRYPTO] RemoteSegmentStoreDirectory.copyFrom (sync): file={}, dest={}, hasCrypto={}", 
+                    src, dest, cryptoMetadata != null);
+        
+        String remoteFilename = getNewRemoteSegmentFilename(dest);
+        logger.info("[CRYPTO] Generated remote filename: {}", remoteFilename);
+        
+        logger.info("[CRYPTO] Calling remoteDataDirectory.copyFrom with crypto");
+        remoteDataDirectory.copyFrom(from, src, remoteFilename, context, cryptoMetadata);
+        logger.info("[CRYPTO] remoteDataDirectory.copyFrom completed, updating cache");
+        
+        postUpload(from, src, remoteFilename, getChecksumOfLocalFile(from, src));
+        logger.info("[CRYPTO] postUpload completed for file={}", src);
+    }
+    
+    // Backward compatible - delegates to crypto-aware version with null
     @Override
     public void copyFrom(Directory from, String src, String dest, IOContext context) throws IOException {
-        String remoteFilename = getNewRemoteSegmentFilename(dest);
-        remoteDataDirectory.copyFrom(from, src, remoteFilename, context);
-        postUpload(from, src, remoteFilename, getChecksumOfLocalFile(from, src));
+        copyFrom(from, src, dest, context, null);
     }
 
     /**
@@ -726,7 +780,7 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
     }
 
     /**
-     * Upload metadata file
+     * Upload metadata file with encryption support
      *
      * @param segmentFiles         segment files that are part of the shard at the time of the latest refresh
      * @param segmentInfosSnapshot SegmentInfos bytes to store as part of metadata file
@@ -734,6 +788,7 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
      * @param translogGeneration translog generation
      * @param replicationCheckpoint ReplicationCheckpoint of primary shard
      * @param nodeId node id
+     * @param cryptoMetadata Optional CryptoMetadata for index-level encryption
      * @throws IOException in case of I/O error while uploading the metadata file
      */
     public void uploadMetadata(
@@ -742,8 +797,12 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
         Directory storeDirectory,
         long translogGeneration,
         ReplicationCheckpoint replicationCheckpoint,
-        String nodeId
+        String nodeId,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
     ) throws IOException {
+        logger.info("[CRYPTO] uploadMetadata called: segmentCount={}, hasCrypto={}", 
+                    segmentFiles.size(), cryptoMetadata != null);
+        
         synchronized (this) {
             String metadataFilename = MetadataFilenameUtils.getMetadataFilename(
                 replicationCheckpoint.getPrimaryTerm(),
@@ -753,7 +812,10 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
                 RemoteSegmentMetadata.CURRENT_VERSION,
                 nodeId
             );
+            logger.info("[CRYPTO] Generated metadata filename: {}", metadataFilename);
+            
             try {
+                logger.info("[CRYPTO] Creating metadata file locally");
                 try (IndexOutput indexOutput = storeDirectory.createOutput(metadataFilename, IOContext.DEFAULT)) {
                     Map<String, Integer> segmentToLuceneVersion = getSegmentToLuceneVersion(segmentFiles, segmentInfosSnapshot);
                     Map<String, String> uploadedSegments = new HashMap<>();
@@ -782,12 +844,27 @@ public final class RemoteSegmentStoreDirectory extends FilterDirectory implement
                         )
                     );
                 }
+                logger.info("[CRYPTO] Metadata file created locally, syncing");
                 storeDirectory.sync(Collections.singleton(metadataFilename));
-                remoteMetadataDirectory.copyFrom(storeDirectory, metadataFilename, metadataFilename, IOContext.DEFAULT);
+                logger.info("[CRYPTO] Uploading metadata file to remote WITHOUT crypto (metadata must be plaintext)");
+                remoteMetadataDirectory.copyFrom(storeDirectory, metadataFilename, metadataFilename, IOContext.DEFAULT, null);
+                logger.info("[CRYPTO] Metadata file uploaded successfully (plaintext)");
             } finally {
                 tryAndDeleteLocalFile(metadataFilename, storeDirectory);
             }
         }
+    }
+    
+    // Backward compatible - delegates to crypto-aware version with null
+    public void uploadMetadata(
+        Collection<String> segmentFiles,
+        SegmentInfos segmentInfosSnapshot,
+        Directory storeDirectory,
+        long translogGeneration,
+        ReplicationCheckpoint replicationCheckpoint,
+        String nodeId
+    ) throws IOException {
+        uploadMetadata(segmentFiles, segmentInfosSnapshot, storeDirectory, translogGeneration, replicationCheckpoint, nodeId, null);
     }
 
     /**

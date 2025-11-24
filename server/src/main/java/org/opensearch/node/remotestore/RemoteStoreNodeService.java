@@ -136,6 +136,7 @@ public class RemoteStoreNodeService {
      * exception.
      */
     public void createAndVerifyRepositories(DiscoveryNode localNode) {
+        logger.info("inside createAndVerifyRepositories for {}", localNode);
         RemoteStoreNodeAttribute nodeAttribute = new RemoteStoreNodeAttribute(localNode);
         RepositoriesService reposService = repositoriesService.get();
         Map<String, Repository> repositories = new HashMap<>();
@@ -145,6 +146,7 @@ public class RemoteStoreNodeService {
             RepositoriesService.validate(repositoryName);
 
             // Create Repository
+            logger.info("inside createAndVerifyRepositories for loop for repositoryMetadata ={}", repositoryMetadata);
             repository = reposService.createRepository(repositoryMetadata);
             logger.info(
                 "remote backed storage repository with name [{}] and type [{}] created",

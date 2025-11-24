@@ -807,7 +807,7 @@ public class CloneSnapshotIT extends AbstractSnapshotIntegTestCase {
                     ActionRunnable.supply(
                         f,
                         () -> BlobStoreRepository.INDEX_SHARD_SNAPSHOTS_FORMAT.read(
-                            repository.shardContainer(repositoryShardId.index(), repositoryShardId.shardId()),
+                            repository.shardContainer(repositoryShardId.index(), repositoryShardId.shardId(), null),
                             generation,
                             NamedXContentRegistry.EMPTY
                         )
@@ -823,7 +823,7 @@ public class CloneSnapshotIT extends AbstractSnapshotIntegTestCase {
     ) {
         return PlainActionFuture.get(f -> repository.threadPool().generic().execute(ActionRunnable.supply(f, () -> {
             IndexShardSnapshot indexShardSnapshot = repository.loadShardSnapshot(
-                repository.shardContainer(repositoryShardId.index(), repositoryShardId.shardId()),
+                repository.shardContainer(repositoryShardId.index(), repositoryShardId.shardId(), null),
                 snapshotId
             );
             assert indexShardSnapshot instanceof BlobStoreIndexShardSnapshot

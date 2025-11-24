@@ -837,7 +837,7 @@ public class RemoteStoreRefreshListenerTests extends IndexShardTestCase {
                 return true;
             };
             doAnswer(answer).when(remoteDirectory)
-                .copyFrom(any(), any(), any(), any(), any(), any(ActionListener.class), any(Boolean.class));
+                .copyFrom(any(), any(), any(), any(), any(), any(ActionListener.class), any(Boolean.class), null);
 
             doAnswer(answer).when(remoteDirectory).copyFrom(any(), any(), any(), any());
         }

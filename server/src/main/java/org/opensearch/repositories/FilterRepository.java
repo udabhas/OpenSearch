@@ -217,8 +217,8 @@ public class FilterRepository implements Repository {
         IndexShardSnapshotStatus snapshotStatus,
         Version repositoryMetaVersion,
         Map<String, Object> userMetadata,
-        ActionListener<String> listener
-    ) {
+        ActionListener<String> listener,
+        IndexMetadata indexMetadata) {
         in.snapshotShard(
             store,
             mapperService,
@@ -229,8 +229,8 @@ public class FilterRepository implements Repository {
             snapshotStatus,
             repositoryMetaVersion,
             userMetadata,
-            listener
-        );
+            listener,
+            indexMetadata);
     }
 
     @Override

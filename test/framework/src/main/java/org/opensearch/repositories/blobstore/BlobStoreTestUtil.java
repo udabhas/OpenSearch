@@ -198,7 +198,7 @@ public final class BlobStoreTestUtil {
         final Map<String, BlobContainer> shardContainers = new HashMap<>();
         int shardCount = repositoryData.shardGenerations().getGens(indexId).size();
         for (int i = 0; i < shardCount; i++) {
-            final BlobContainer shardContainer = repository.shardContainer(indexId, i);
+            final BlobContainer shardContainer = repository.shardContainer(indexId, i, null);
             shardContainers.put(String.valueOf(i), shardContainer);
         }
         return shardContainers;

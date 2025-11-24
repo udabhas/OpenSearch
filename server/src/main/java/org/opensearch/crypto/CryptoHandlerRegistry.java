@@ -108,6 +108,7 @@ public class CryptoHandlerRegistry {
      * @throws IllegalStateException If the crypto registry is not yet loaded.
      */
     public CryptoKeyProviderPlugin getCryptoKeyProviderPlugin(String keyProviderType) {
+        logger.info("inside getCryptoKeyProviderPlugin, printing registry = {}", registry);
         if (registry.get() == null) {
             throw new IllegalStateException("Crypto registry is not yet loaded");
         }
@@ -123,16 +124,21 @@ public class CryptoHandlerRegistry {
      * @throws CryptoRegistryException If the key provider is not installed or there is an error during crypto manager creation.
      */
     public CryptoHandler<?, ?> fetchCryptoHandler(CryptoMetadata cryptoMetadata) {
+        logger.info("inside fetchCryptoHandler with {}", cryptoMetadata);
         CryptoHandler<?, ?> cryptoHandler = registeredCryptoHandlers.get(cryptoMetadata);
+        logger.info("printing registeredCryptoHandlers = {}", registeredCryptoHandlers);
         if (cryptoHandler == null) {
+            logger.info("inside fetchCryptoHandler first null if condition");
             synchronized (registeredCryptoHandlers) {
                 cryptoHandler = registeredCryptoHandlers.get(cryptoMetadata);
                 if (cryptoHandler == null) {
+                    logger.info("inside fetchCryptoHandler second null if condition");
                     Runnable onClose = () -> {
                         synchronized (registeredCryptoHandlers) {
                             registeredCryptoHandlers.remove(cryptoMetadata);
                         }
                     };
+
                     cryptoHandler = createCryptoHandler(cryptoMetadata, onClose);
                     registeredCryptoHandlers.put(cryptoMetadata, cryptoHandler);
                 }
@@ -142,9 +148,11 @@ public class CryptoHandlerRegistry {
     }
 
     private CryptoHandler<?, ?> createCryptoHandler(CryptoMetadata cryptoMetadata, Runnable onClose) {
-        logger.debug("creating crypto client [{}][{}]", cryptoMetadata.keyProviderType(), cryptoMetadata.keyProviderName());
+        logger.info("creating crypto client [{}][{}]", cryptoMetadata.keyProviderType(), cryptoMetadata.keyProviderName());
         CryptoKeyProviderPlugin keyProviderPlugin = getCryptoKeyProviderPlugin(cryptoMetadata.keyProviderType());
+        logger.info("inside createCryptoHandler keyProviderPlugin = {}", keyProviderPlugin);
         if (keyProviderPlugin == null) {
+            logger.info("inside createCryptoHandler keyProviderPlugin == null ", keyProviderPlugin);
             throw new CryptoRegistryException(cryptoMetadata.keyProviderName(), cryptoMetadata.keyProviderType());
         }
 

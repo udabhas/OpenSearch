@@ -361,18 +361,20 @@ public interface Repository extends LifecycleComponent {
      * <p>
      * As snapshot process progresses, implementation of this method should update {@link IndexShardSnapshotStatus} object and check
      * {@link IndexShardSnapshotStatus#isAborted()} to see if the snapshot process should be aborted.
-     * @param store                    store to be snapshotted
-     * @param mapperService            the shards mapper service
-     * @param snapshotId               snapshot id
-     * @param indexId                  id for the index being snapshotted
-     * @param snapshotIndexCommit      commit point
-     * @param shardStateIdentifier     a unique identifier of the state of the shard that is stored with the shard's snapshot and used
-     *                                 to detect if the shard has changed between snapshots. If {@code null} is passed as the identifier
-     *                                 snapshotting will be done by inspecting the physical files referenced by {@code snapshotIndexCommit}
-     * @param snapshotStatus           snapshot status
-     * @param repositoryMetaVersion    version of the updated repository metadata to write
-     * @param userMetadata             user metadata of the snapshot found in {@link SnapshotsInProgress.Entry#userMetadata()}
-     * @param listener                 listener invoked on completion
+     *
+     * @param store                 store to be snapshotted
+     * @param mapperService         the shards mapper service
+     * @param snapshotId            snapshot id
+     * @param indexId               id for the index being snapshotted
+     * @param snapshotIndexCommit   commit point
+     * @param shardStateIdentifier  a unique identifier of the state of the shard that is stored with the shard's snapshot and used
+     *                              to detect if the shard has changed between snapshots. If {@code null} is passed as the identifier
+     *                              snapshotting will be done by inspecting the physical files referenced by {@code snapshotIndexCommit}
+     * @param snapshotStatus        snapshot status
+     * @param repositoryMetaVersion version of the updated repository metadata to write
+     * @param userMetadata          user metadata of the snapshot found in {@link SnapshotsInProgress.Entry#userMetadata()}
+     * @param listener              listener invoked on completion
+     * @param indexMetadata
      */
     void snapshotShard(
         Store store,
@@ -384,8 +386,8 @@ public interface Repository extends LifecycleComponent {
         IndexShardSnapshotStatus snapshotStatus,
         Version repositoryMetaVersion,
         Map<String, Object> userMetadata,
-        ActionListener<String> listener
-    );
+        ActionListener<String> listener,
+        IndexMetadata indexMetadata);
 
     /**
      * Adds a reference of remote store data for a index commit point.

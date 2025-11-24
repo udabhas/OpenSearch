@@ -135,6 +135,22 @@ public class CryptoMetadata implements Writeable {
         return new CryptoMetadata(keyProviderName, keyProviderType, settings);
     }
 
+    public static CryptoMetadata fromIndexSettings(Settings indexSettings) {
+        String keyProviderName = indexSettings.get("index.store.crypto.key_provider");
+        if (keyProviderName == null) {
+            return null;
+        }
+
+        String keyProviderType = indexSettings.get(
+            "index.store.crypto.key_provider_type",
+            "aws-kms"  // default
+        );
+
+        Settings cryptoSettings = indexSettings.getAsSettings("index.store.crypto");
+
+        return new CryptoMetadata(keyProviderName, keyProviderType, cryptoSettings);
+    }
+
     public void toXContent(CryptoMetadata cryptoMetadata, XContentBuilder builder, ToXContent.Params params) throws IOException {
         builder.startObject(CRYPTO_METADATA_KEY);
         builder.field(KEY_PROVIDER_NAME_KEY, cryptoMetadata.keyProviderName());

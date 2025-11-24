@@ -50,8 +50,12 @@ public class RemoteStoreUploaderService implements RemoteStoreUploader {
         Map<String, Long> localSegmentsSizeMap,
         ActionListener<Void> listener,
         Function<Map<String, Long>, UploadListener> uploadListenerFunction,
-        boolean isLowPriorityUpload
+        boolean isLowPriorityUpload,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
     ) {
+        logger.info("[CRYPTO] RemoteStoreUploaderService.uploadSegments: segmentCount={}, hasCrypto={}", 
+                    localSegments.size(), cryptoMetadata != null);
+        
         if (localSegments.isEmpty()) {
             logger.debug("No new segments to upload in uploadNewSegments");
             listener.onResponse(null);
@@ -64,6 +68,7 @@ public class RemoteStoreUploaderService implements RemoteStoreUploader {
         Directory directory = ((FilterDirectory) (((FilterDirectory) storeDirectory).getDelegate())).getDelegate();
 
         for (String localSegment : localSegments) {
+            logger.info("[CRYPTO] Uploading segment: file={}, hasCrypto={}", localSegment, cryptoMetadata != null);
             // Initializing listener here to ensure that the stats increment operations are thread-safe
             UploadListener statsListener = uploadListenerFunction.apply(localSegmentsSizeMap);
             ActionListener<Void> aggregatedListener = ActionListener.wrap(resp -> {
@@ -82,8 +87,9 @@ public class RemoteStoreUploaderService implements RemoteStoreUploader {
                 batchUploadListener.onFailure(ex);
             });
             statsListener.beforeUpload(localSegment);
-            // Place where the actual upload is happening
-            remoteDirectory.copyFrom(storeDirectory, localSegment, IOContext.DEFAULT, aggregatedListener, isLowPriorityUpload);
+            // Place where the actual upload is happening - NOW WITH CRYPTO!
+            logger.info("[CRYPTO] Calling remoteDirectory.copyFrom with crypto for file={}", localSegment);
+            remoteDirectory.copyFrom(storeDirectory, localSegment, IOContext.DEFAULT, aggregatedListener, isLowPriorityUpload, cryptoMetadata);
         }
     }
 }

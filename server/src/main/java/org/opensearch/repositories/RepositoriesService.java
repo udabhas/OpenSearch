@@ -174,6 +174,14 @@ public class RepositoriesService extends AbstractLifecycleComponent implements C
     public void registerOrUpdateRepository(final PutRepositoryRequest request, final ActionListener<ClusterStateUpdateResponse> listener) {
         assert lifecycle.started() : "Trying to register new repository but service is in state [" + lifecycle.state() + "]";
 
+
+        logger.info("inside registerOrUpdateRepository method : request = {}, lister.isInstanceOf = {}", request, listener.getClass());
+        StackTraceElement[] stackTraceElements = Thread.currentThread().getStackTrace();
+        for(int i=0;i<stackTraceElements.length;i++){
+            logger.info("stack trace = {}", stackTraceElements[i].toString());
+        }
+//        logger.info("registerOrUpdateRepository stack trace complete here");
+
         RepositoryMetadata newRepositoryMetadata = new RepositoryMetadata(
             request.name(),
             request.type(),

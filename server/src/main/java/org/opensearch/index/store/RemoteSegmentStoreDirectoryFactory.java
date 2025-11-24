@@ -101,7 +101,9 @@ public class RemoteSegmentStoreDirectoryFactory implements IndexStorePlugin.Dire
                 blobStoreRepository::maybeRateLimitLowPriorityRemoteUploadTransfers,
                 blobStoreRepository::maybeRateLimitRemoteDownloadTransfers,
                 blobStoreRepository::maybeRateLimitLowPriorityDownloadTransfers,
-                pendingDownloadMergedSegments
+                pendingDownloadMergedSegments,
+                blobStoreRepository.blobStore(),  // NEW - for crypto-aware container creation
+                dataPath                          // NEW - for crypto-aware container creation
             );
 
             RemoteStorePathStrategy.ShardDataPathInput mdPathInput = RemoteStorePathStrategy.ShardDataPathInput.builder()
@@ -115,7 +117,16 @@ public class RemoteSegmentStoreDirectoryFactory implements IndexStorePlugin.Dire
                 .build();
             // Derive the path for metadata directory of SEGMENTS
             BlobPath mdPath = pathStrategy.generatePath(mdPathInput);
-            RemoteDirectory metadataDirectory = new RemoteDirectory(blobStoreRepository.blobStore().blobContainer(mdPath));
+            RemoteDirectory metadataDirectory = new RemoteDirectory(
+                blobStoreRepository.blobStore().blobContainer(mdPath),
+                blobStoreRepository::maybeRateLimitRemoteUploadTransfers,
+                blobStoreRepository::maybeRateLimitLowPriorityRemoteUploadTransfers,
+                blobStoreRepository::maybeRateLimitRemoteDownloadTransfers,
+                blobStoreRepository::maybeRateLimitLowPriorityDownloadTransfers,
+                null,                             // No pending downloads for metadata
+                blobStoreRepository.blobStore(),  // NEW - for crypto-aware container creation
+                mdPath                            // NEW - for crypto-aware container creation
+            );
 
             // The path for lock is derived within the RemoteStoreLockManagerFactory
             RemoteStoreLockManager mdLockManager = RemoteStoreLockManagerFactory.newLockManager(

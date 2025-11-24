@@ -223,6 +223,13 @@ public final class RemoteStoreRefreshListener extends ReleasableRetryableRefresh
             // in the remote store.
             return indexShard.state() != IndexShardState.STARTED || !(indexShard.getEngine() instanceof InternalEngine);
         }
+        
+        // Extract crypto metadata once at start of sync
+        logger.info("[CRYPTO] syncSegments: Extracting IndexMetadata from indexShard");
+        org.opensearch.cluster.metadata.IndexMetadata indexMetadata = indexShard.indexSettings().getIndexMetadata();
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata = resolveCryptoMetadata(indexMetadata);
+        logger.info("[CRYPTO] syncSegments: Using cryptoMetadata={}", cryptoMetadata != null ? "present" : "null");
+        
         beforeSegmentsSync();
         long refreshTimeMs = segmentTracker.getLocalRefreshTimeMs(), refreshClockTimeMs = segmentTracker.getLocalRefreshClockTimeMs();
         long refreshSeqNo = segmentTracker.getLocalRefreshSeqNo();
@@ -267,8 +274,9 @@ public final class RemoteStoreRefreshListener extends ReleasableRetryableRefresh
                         public void onResponse(Void unused) {
                             try {
                                 logger.debug("New segments upload successful");
-                                // Start metadata file upload
-                                uploadMetadata(localSegmentsPostRefresh, segmentInfos, checkpoint);
+                                logger.info("[CRYPTO] syncSegments: Starting metadata upload WITHOUT crypto (metadata must be plaintext)");
+                                // Start metadata file upload WITHOUT crypto - metadata must be plaintext!
+                                uploadMetadata(localSegmentsPostRefresh, segmentInfos, checkpoint, null);
                                 logger.debug("Metadata upload successful");
                                 clearStaleFilesFromLocalSegmentChecksumMap(localSegmentsPostRefresh);
                                 onSuccessfulSegmentsSync(
@@ -296,8 +304,9 @@ public final class RemoteStoreRefreshListener extends ReleasableRetryableRefresh
                         }
                     }, latch);
 
-                    // Start the segments files upload
-                    uploadNewSegments(localSegmentsPostRefresh, localSegmentsSizeMap, segmentUploadsCompletedListener);
+                    // Start the segments files upload with crypto
+                    logger.info("[CRYPTO] syncSegments: Calling uploadNewSegments with crypto");
+                    uploadNewSegments(localSegmentsPostRefresh, localSegmentsSizeMap, segmentUploadsCompletedListener, cryptoMetadata);
                     if (latch.await(
                         remoteStoreSettings.getClusterRemoteSegmentTransferTimeout().millis(),
                         TimeUnit.MILLISECONDS
@@ -324,28 +333,65 @@ public final class RemoteStoreRefreshListener extends ReleasableRetryableRefresh
     }
 
     /**
+     * Resolves CryptoMetadata with 2-layer priority:
+     * 1. Index-level encryption from index settings (if configured)
+     * 2. Repository-level encryption (fallback to null)
+     * 
+     * @param indexMetadata Index metadata containing crypto settings
+     * @return CryptoMetadata if encryption is configured, null otherwise
+     */
+    private org.opensearch.cluster.metadata.CryptoMetadata resolveCryptoMetadata(org.opensearch.cluster.metadata.IndexMetadata indexMetadata) {
+        logger.info("[CRYPTO] resolveCryptoMetadata: indexMetadata={}", 
+                    indexMetadata != null ? indexMetadata.getIndex().getName() : "null");
+        
+        if (indexMetadata == null) {
+            logger.info("[CRYPTO] IndexMetadata is null, returning null CryptoMetadata");
+            return null;
+        }
+        
+        org.opensearch.common.settings.Settings indexSettings = indexMetadata.getSettings();
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata = org.opensearch.cluster.metadata.CryptoMetadata.fromIndexSettings(indexSettings);
+        
+        if (cryptoMetadata != null) {
+            logger.info("[CRYPTO] Resolved index-level encryption: provider={}, type={}", 
+                        cryptoMetadata.keyProviderName(), 
+                        cryptoMetadata.keyProviderType());
+        } else {
+            logger.info("[CRYPTO] No index-level encryption configured, using repository-level or none");
+        }
+        
+        return cryptoMetadata;
+    }
+
+    /**
      * Uploads new segment files to the remote store.
      *
      * @param localSegmentsPostRefresh collection of segment files present after refresh
      * @param localSegmentsSizeMap map of segment file names to their sizes
      * @param segmentUploadsCompletedListener listener to be notified when upload completes
+     * @param cryptoMetadata optional CryptoMetadata for index-level encryption
      */
     private void uploadNewSegments(
         Collection<String> localSegmentsPostRefresh,
         Map<String, Long> localSegmentsSizeMap,
-        ActionListener<Void> segmentUploadsCompletedListener
+        ActionListener<Void> segmentUploadsCompletedListener,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
     ) {
+        logger.info("[CRYPTO] uploadNewSegments: fileCount={}, hasCrypto={}", 
+                    localSegmentsPostRefresh.size(), cryptoMetadata != null);
         Collection<String> filteredFiles = localSegmentsPostRefresh.stream().filter(file -> !skipUpload(file)).collect(Collectors.toList());
         Function<Map<String, Long>, UploadListener> uploadListenerFunction = (Map<String, Long> sizeMap) -> createUploadListener(
             localSegmentsSizeMap
         );
 
+        logger.info("[CRYPTO] uploadNewSegments: Calling remoteStoreUploader.uploadSegments with crypto");
         remoteStoreUploader.uploadSegments(
             filteredFiles,
             localSegmentsSizeMap,
             segmentUploadsCompletedListener,
             uploadListenerFunction,
-            isLowPriorityUpload()
+            isLowPriorityUpload(),
+            cryptoMetadata
         );
     }
 
@@ -424,8 +470,15 @@ public final class RemoteStoreRefreshListener extends ReleasableRetryableRefresh
         return false;
     }
 
-    void uploadMetadata(Collection<String> localSegmentsPostRefresh, SegmentInfos segmentInfos, ReplicationCheckpoint replicationCheckpoint)
-        throws IOException {
+    void uploadMetadata(
+        Collection<String> localSegmentsPostRefresh, 
+        SegmentInfos segmentInfos, 
+        ReplicationCheckpoint replicationCheckpoint,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
+    ) throws IOException {
+        logger.info("[CRYPTO] uploadMetadata called: segmentCount={}, hasCrypto={}", 
+                    localSegmentsPostRefresh.size(), cryptoMetadata != null);
+        
         final long maxSeqNo = ((InternalEngine) indexShard.getEngine()).currentOngoingRefreshCheckpoint();
         SegmentInfos segmentInfosSnapshot = segmentInfos.clone();
         Map<String, String> userData = segmentInfosSnapshot.getUserData();
@@ -438,14 +491,17 @@ public final class RemoteStoreRefreshListener extends ReleasableRetryableRefresh
             throw new UnsupportedOperationException("Encountered null TranslogGeneration while uploading metadata to remote segment store");
         } else {
             long translogFileGeneration = translogGeneration.translogFileGeneration;
+            logger.info("[CRYPTO] uploadMetadata: Calling remoteDirectory.uploadMetadata with crypto");
             remoteDirectory.uploadMetadata(
                 localSegmentsPostRefresh,
                 segmentInfosSnapshot,
                 storeDirectory,
                 translogFileGeneration,
                 replicationCheckpoint,
-                indexShard.getNodeId()
+                indexShard.getNodeId(),
+                cryptoMetadata
             );
+            logger.info("[CRYPTO] uploadMetadata: remoteDirectory.uploadMetadata completed");
         }
     }
 

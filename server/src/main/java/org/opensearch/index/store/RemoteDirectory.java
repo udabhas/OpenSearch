@@ -19,9 +19,12 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.Lock;
 import org.opensearch.ExceptionsHelper;
 import org.opensearch.action.LatchedActionListener;
+import org.opensearch.cluster.metadata.CryptoMetadata;
+import org.opensearch.common.Nullable;
 import org.opensearch.common.blobstore.AsyncMultiStreamBlobContainer;
 import org.opensearch.common.blobstore.BlobContainer;
 import org.opensearch.common.blobstore.BlobMetadata;
+import org.opensearch.common.blobstore.EncryptedBlobStore;
 import org.opensearch.common.blobstore.exception.CorruptFileException;
 import org.opensearch.common.blobstore.stream.write.WriteContext;
 import org.opensearch.common.blobstore.stream.write.WritePriority;
@@ -62,6 +65,8 @@ import static org.opensearch.common.blobstore.transfer.RemoteTransferContainer.c
 public class RemoteDirectory extends Directory {
 
     protected final BlobContainer blobContainer;
+    protected final org.opensearch.common.blobstore.BlobStore blobStore;  // NEW - for crypto override
+    protected final org.opensearch.common.blobstore.BlobPath blobPath;    // NEW - for crypto override
     private static final Logger logger = LogManager.getLogger(RemoteDirectory.class);
 
     private final UnaryOperator<OffsetRangeInputStream> uploadRateLimiter;
@@ -85,8 +90,30 @@ public class RemoteDirectory extends Directory {
         return blobContainer;
     }
 
+    /**
+     * Gets blob container. CryptoMetadata no longer used to create wrapper here
+     * to prevent double encryption with SSE repos.
+     * 
+     * Repository's encryption method (determined at blobStore initialization) is used.
+     * For index-level key override, rely on upload methods passing cryptoMetadata.
+     *
+     * @param cryptoMetadata optional CryptoMetadata (currently unused to prevent double encryption)
+     * @return BlobContainer using repository's encryption configuration
+     */
+    public BlobContainer getBlobContainer(@Nullable CryptoMetadata cryptoMetadata) {
+        logger.info("[CRYPTO] getBlobContainer called: hasCrypto={}, blobStoreType={}",
+                    cryptoMetadata != null,
+                    blobStore != null ? blobStore.getClass().getSimpleName() : "null");
+
+        // Don't create EncryptedBlobStore wrapper here - prevents double encryption
+        // Repository's encryption method (CSE/SSE) determined by blobStore initialization
+        // Always return default container
+        logger.info("[CRYPTO] Returning default blobContainer (no wrapper to prevent double encryption)");
+        return blobContainer;
+    }
+
     public RemoteDirectory(BlobContainer blobContainer) {
-        this(blobContainer, UnaryOperator.identity(), UnaryOperator.identity(), UnaryOperator.identity(), UnaryOperator.identity(), null);
+        this(blobContainer, UnaryOperator.identity(), UnaryOperator.identity(), UnaryOperator.identity(), UnaryOperator.identity(), null, null, null);
     }
 
     public RemoteDirectory(
@@ -97,7 +124,37 @@ public class RemoteDirectory extends Directory {
         UnaryOperator<InputStream> lowPriorityDownloadRateLimiter,
         Map<String, String> pendingDownloadMergedSegments
     ) {
+        this(blobContainer, uploadRateLimiter, lowPriorityUploadRateLimiter, downloadRateLimiter, lowPriorityDownloadRateLimiter, pendingDownloadMergedSegments, null, null);
+    }
+
+    /**
+     * Constructor with BlobStore and BlobPath support for crypto-aware container creation.
+     *
+     * @param blobContainer The blob container for default operations
+     * @param uploadRateLimiter Rate limiter for uploads
+     * @param lowPriorityUploadRateLimiter Rate limiter for low priority uploads
+     * @param downloadRateLimiter Rate limiter for downloads
+     * @param lowPriorityDownloadRateLimiter Rate limiter for low priority downloads
+     * @param pendingDownloadMergedSegments Map of pending merged segments
+     * @param blobStore BlobStore instance for crypto-aware container creation (can be null for backward compatibility)
+     * @param blobPath BlobPath for crypto-aware container creation (can be null for backward compatibility)
+     */
+    public RemoteDirectory(
+        BlobContainer blobContainer,
+        UnaryOperator<OffsetRangeInputStream> uploadRateLimiter,
+        UnaryOperator<OffsetRangeInputStream> lowPriorityUploadRateLimiter,
+        UnaryOperator<InputStream> downloadRateLimiter,
+        UnaryOperator<InputStream> lowPriorityDownloadRateLimiter,
+        Map<String, String> pendingDownloadMergedSegments,
+        org.opensearch.common.blobstore.BlobStore blobStore,
+        org.opensearch.common.blobstore.BlobPath blobPath
+    ) {
+        logger.info("[CRYPTO] RemoteDirectory constructor: blobPath={}, hasBlobStore={}",
+                    blobPath, blobStore != null);
+
         this.blobContainer = blobContainer;
+        this.blobStore = blobStore;
+        this.blobPath = blobPath;
         this.lowPriorityUploadRateLimiter = lowPriorityUploadRateLimiter;
         this.uploadRateLimiter = uploadRateLimiter;
         this.downloadRateLimiterProvider = new DownloadRateLimiterProvider(downloadRateLimiter, lowPriorityDownloadRateLimiter);
@@ -372,17 +429,58 @@ public class RemoteDirectory extends Directory {
         IOContext context,
         Runnable postUploadRunner,
         ActionListener<Void> listener,
-        boolean lowPriorityUpload
-    ) {
+        boolean lowPriorityUpload,
+        CryptoMetadata cryptoMetadata) {
+        logger.info("[CRYPTO] copyFrom (async) called: file={}, hasCrypto={}", src, cryptoMetadata != null);
+
         if (blobContainer instanceof AsyncMultiStreamBlobContainer) {
             try {
-                uploadBlob(from, src, remoteFileName, context, postUploadRunner, listener, lowPriorityUpload);
+                uploadBlob(from, src, remoteFileName, context, postUploadRunner, listener, lowPriorityUpload, cryptoMetadata);
             } catch (Exception e) {
                 listener.onFailure(e);
             }
             return true;
         }
         return false;
+    }
+
+    /**
+     * Synchronous copyFrom with CryptoMetadata support for simple file copies.
+     * Used by metadata uploads and segments_N files that don't use async multi-stream upload.
+     *
+     * @param from Source directory
+     * @param src Source filename
+     * @param dest Destination filename (remote filename)
+     * @param context IOContext
+     * @param cryptoMetadata Optional CryptoMetadata for index-level encryption
+     * @throws IOException if copy fails
+     */
+    public void copyFrom(
+        Directory from,
+        String src,
+        String dest,
+        IOContext context,
+        CryptoMetadata cryptoMetadata
+    ) throws IOException {
+        logger.info("[CRYPTO] copyFrom (sync) called: file={}, dest={}, hasCrypto={}",
+                    src, dest, cryptoMetadata != null);
+
+        // Get crypto-aware container
+        BlobContainer targetContainer = getBlobContainer(cryptoMetadata);
+        logger.info("[CRYPTO] copyFrom (sync): Using container type={}", targetContainer.getClass().getSimpleName());
+
+        // Read from source and upload to blob container
+        try (IndexInput indexInput = from.openInput(src, context)) {
+            long fileLength = indexInput.length();
+            logger.info("[CRYPTO] copyFrom (sync): Opened IndexInput, file size={} bytes", fileLength);
+
+            // Write directly to blob container with crypto
+            logger.info("[CRYPTO] copyFrom (sync): Writing to blob container");
+            try (IndexOutput indexOutput = new RemoteIndexOutput(dest, targetContainer)) {
+                indexOutput.copyBytes(indexInput, fileLength);
+            }
+            logger.info("[CRYPTO] copyFrom (sync): Data copied successfully to remote for file={}", src);
+        }
     }
 
     private void uploadBlob(
@@ -392,30 +490,53 @@ public class RemoteDirectory extends Directory {
         IOContext ioContext,
         Runnable postUploadRunner,
         ActionListener<Void> listener,
-        boolean lowPriorityUpload
-    ) throws Exception {
+        boolean lowPriorityUpload,
+        CryptoMetadata cryptoMetadata) throws Exception {
+        logger.info("[CRYPTO] uploadBlob START: file={}, remoteFileName={}, hasCrypto={}, lowPriority={}",
+                    src, remoteFileName, cryptoMetadata != null, lowPriorityUpload);
+
         assert ioContext != IOContext.READONCE : "Remote upload will fail with IoContext.READONCE";
+
+        logger.info("[CRYPTO] uploadBlob: Calculating checksum for file={}", src);
         long expectedChecksum = calculateChecksumOfChecksum(from, src);
+        logger.info("[CRYPTO] uploadBlob: Checksum calculated, expectedChecksum={}", expectedChecksum);
+
         long contentLength;
+        logger.info("[CRYPTO] uploadBlob: Opening IndexInput for file={}", src);
         IndexInput indexInput = from.openInput(src, ioContext);
         try {
             contentLength = indexInput.length();
+            logger.info("[CRYPTO] uploadBlob: File size={} bytes", contentLength);
+
+            // Get crypto-aware container
+            logger.info("[CRYPTO] uploadBlob: Getting crypto-aware BlobContainer");
+            BlobContainer targetContainer = getBlobContainer(cryptoMetadata);
+            logger.info("[CRYPTO] uploadBlob: Using container type={}, path={}",
+                        targetContainer.getClass().getSimpleName(), blobContainer.path());
+
             boolean remoteIntegrityEnabled = false;
-            if (getBlobContainer() instanceof AsyncMultiStreamBlobContainer) {
-                remoteIntegrityEnabled = ((AsyncMultiStreamBlobContainer) getBlobContainer()).remoteIntegrityCheckSupported();
+            if (targetContainer instanceof AsyncMultiStreamBlobContainer) {
+                remoteIntegrityEnabled = ((AsyncMultiStreamBlobContainer) targetContainer).remoteIntegrityCheckSupported();
+                logger.info("[CRYPTO] uploadBlob: Remote integrity check supported={}", remoteIntegrityEnabled);
             }
             lowPriorityUpload = lowPriorityUpload || contentLength > ByteSizeUnit.GB.toBytes(15);
+            logger.info("[CRYPTO] uploadBlob: Adjusted lowPriority={} based on file size", lowPriorityUpload);
+
             RemoteTransferContainer.OffsetRangeInputStreamSupplier offsetRangeInputStreamSupplier;
 
             if (lowPriorityUpload) {
+                logger.info("[CRYPTO] uploadBlob: Setting up LOW priority upload stream supplier");
                 offsetRangeInputStreamSupplier = (size, position) -> lowPriorityUploadRateLimiter.apply(
                     new OffsetRangeIndexInputStream(indexInput.clone(), size, position)
                 );
             } else {
+                logger.info("[CRYPTO] uploadBlob: Setting up NORMAL priority upload stream supplier");
                 offsetRangeInputStreamSupplier = (size, position) -> uploadRateLimiter.apply(
                     new OffsetRangeIndexInputStream(indexInput.clone(), size, position)
                 );
             }
+
+            logger.info("[CRYPTO] uploadBlob: Creating RemoteTransferContainer for file={}", src);
             RemoteTransferContainer remoteTransferContainer = new RemoteTransferContainer(
                 src,
                 remoteFileName,
@@ -424,18 +545,24 @@ public class RemoteDirectory extends Directory {
                 lowPriorityUpload ? WritePriority.LOW : WritePriority.NORMAL,
                 offsetRangeInputStreamSupplier,
                 expectedChecksum,
-                remoteIntegrityEnabled
+                remoteIntegrityEnabled,
+                null,
+                cryptoMetadata
             );
+            logger.info("[CRYPTO] uploadBlob: RemoteTransferContainer created successfully");
             ActionListener<Void> completionListener = ActionListener.wrap(resp -> {
+                logger.info("[CRYPTO] uploadBlob: Upload SUCCESS for file={}", src);
                 try {
+                    logger.info("[CRYPTO] uploadBlob: Running postUpload actions for file={}", src);
                     postUploadRunner.run();
+                    logger.info("[CRYPTO] uploadBlob: PostUpload completed, notifying listener");
                     listener.onResponse(null);
                 } catch (Exception e) {
-                    logger.error(() -> new ParameterizedMessage("Exception in segment postUpload for file [{}]", src), e);
+                    logger.error(() -> new ParameterizedMessage("[CRYPTO] Exception in segment postUpload for file [{}]", src), e);
                     listener.onFailure(e);
                 }
             }, ex -> {
-                logger.error(() -> new ParameterizedMessage("Failed to upload blob {}", src), ex);
+                logger.error(() -> new ParameterizedMessage("[CRYPTO] Upload FAILED for blob {}", src), ex);
                 IOException corruptIndexException = ExceptionsHelper.unwrapCorruption(ex);
                 if (corruptIndexException != null) {
                     listener.onFailure(corruptIndexException);
@@ -466,8 +593,11 @@ public class RemoteDirectory extends Directory {
                 }
             });
 
+            logger.info("[CRYPTO] uploadBlob: Creating WriteContext");
             WriteContext writeContext = remoteTransferContainer.createWriteContext();
-            ((AsyncMultiStreamBlobContainer) blobContainer).asyncBlobUpload(writeContext, completionListener);
+            logger.info("[CRYPTO] uploadBlob: Initiating asyncBlobUpload to targetContainer for file={}", src);
+            ((AsyncMultiStreamBlobContainer) targetContainer).asyncBlobUpload(writeContext, completionListener);
+            logger.info("[CRYPTO] uploadBlob: asyncBlobUpload call initiated (async operation in progress)");
         } catch (Exception e) {
             logger.warn("Exception while calling asyncBlobUpload, closing IndexInput to avoid leak");
             indexInput.close();

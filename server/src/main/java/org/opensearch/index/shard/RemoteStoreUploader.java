@@ -25,6 +25,7 @@ public interface RemoteStoreUploader {
         Map<String, Long> localSegmentsSizeMap,
         ActionListener<Void> listener,
         Function<Map<String, Long>, UploadListener> uploadListenerFunction,
-        boolean isLowPriorityUpload
+        boolean isLowPriorityUpload,
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
     );
 }

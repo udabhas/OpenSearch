@@ -31,6 +31,7 @@ public class WriteContext {
     private final boolean doRemoteDataIntegrityCheck;
     private final Long expectedChecksum;
     private final Map<String, String> metadata;
+    private final org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata;
 
     /**
      * Construct a new WriteContext object
@@ -52,7 +53,8 @@ public class WriteContext {
         CheckedConsumer<Boolean, IOException> uploadFinalizer,
         boolean doRemoteDataIntegrityCheck,
         @Nullable Long expectedChecksum,
-        @Nullable Map<String, String> metadata
+        @Nullable Map<String, String> metadata,
+        @Nullable org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
     ) {
         this.fileName = fileName;
         this.streamContextSupplier = streamContextSupplier;
@@ -63,6 +65,7 @@ public class WriteContext {
         this.doRemoteDataIntegrityCheck = doRemoteDataIntegrityCheck;
         this.expectedChecksum = expectedChecksum;
         this.metadata = metadata;
+        this.cryptoMetadata = cryptoMetadata;
     }
 
     /**
@@ -78,6 +81,7 @@ public class WriteContext {
         this.doRemoteDataIntegrityCheck = writeContext.doRemoteDataIntegrityCheck;
         this.expectedChecksum = writeContext.expectedChecksum;
         this.metadata = writeContext.metadata;
+        this.cryptoMetadata = writeContext.cryptoMetadata;
     }
 
     /**
@@ -145,6 +149,13 @@ public class WriteContext {
     }
 
     /**
+     * @return the CryptoMetadata for index-level encryption settings.
+     */
+    public org.opensearch.cluster.metadata.CryptoMetadata getCryptoMetadata() {
+        return cryptoMetadata;
+    }
+
+    /**
      * Builder for {@link WriteContext}.
      *
      * @opensearch.internal
@@ -159,6 +170,7 @@ public class WriteContext {
         private boolean doRemoteDataIntegrityCheck;
         private Long expectedChecksum;
         private Map<String, String> metadata;
+        private org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata;
 
         public Builder fileName(String fileName) {
             this.fileName = fileName;
@@ -205,6 +217,11 @@ public class WriteContext {
             return this;
         }
 
+        public Builder cryptoMetadata(org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata) {
+            this.cryptoMetadata = cryptoMetadata;
+            return this;
+        }
+
         public WriteContext build() {
             return new WriteContext(
                 fileName,
@@ -215,7 +232,8 @@ public class WriteContext {
                 uploadFinalizer,
                 doRemoteDataIntegrityCheck,
                 expectedChecksum,
-                metadata
+                metadata,
+                cryptoMetadata
             );
         }
     }

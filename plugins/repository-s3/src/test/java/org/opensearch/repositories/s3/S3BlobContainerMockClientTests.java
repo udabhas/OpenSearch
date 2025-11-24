@@ -757,8 +757,8 @@ public class S3BlobContainerMockClientTests extends OpenSearchTestCase implement
             anyString(),
             any(InputStream.class),
             anyLong(),
-            anyMap()
-        );
+            anyMap(),
+            null, null);
 
         if (expectException) {
             verify(client, times(1)).abortMultipartUpload(any(AbortMultipartUploadRequest.class));

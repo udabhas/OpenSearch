@@ -191,7 +191,48 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
     }
 
     /**
-     * Write blob with its object metadata.
+     * Write blob with its object metadata and optional encryption settings.
+     */
+    @ExperimentalApi
+    @Override
+    public void writeBlobWithMetadata(
+        String blobName,
+        InputStream inputStream,
+        long blobSize,
+        boolean failIfAlreadyExists,
+        @Nullable Map<String, String> metadata,
+        @Nullable org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata
+    ) throws IOException {
+        // Extract index-level SSE-KMS settings from CryptoMetadata
+        // Must be final for lambda
+        final String indexKmsKey;
+        final String indexEncContext;
+
+        if (cryptoMetadata != null && "aws-kms".equals(cryptoMetadata.keyProviderType())) {
+            // Extract index-level SSE-KMS key and context from CryptoMetadata.settings()
+            // Note: Index stores as "index.store.crypto.kms.*" → becomes "kms.*" in settings
+            indexKmsKey = cryptoMetadata.settings().get("kms.key_arn");
+            indexEncContext = cryptoMetadata.settings().get("kms.encryption_context");
+            logger.info("[SSE-KMS-INDEX] Extracted from CryptoMetadata: key={}, hasContext={}",
+                       indexKmsKey != null, indexEncContext != null);
+        } else {
+            indexKmsKey = null;
+            indexEncContext = null;
+        }
+
+        assert inputStream.markSupported() : "No mark support on inputStream breaks the S3 SDK's ability to retry requests";
+        SocketAccess.doPrivilegedIOException(() -> {
+            if (blobSize <= getLargeBlobThresholdInBytes()) {
+                executeSingleUpload(blobStore, buildKey(blobName), inputStream, blobSize, metadata, indexKmsKey, indexEncContext);
+            } else {
+                executeMultipartUpload(blobStore, buildKey(blobName), inputStream, blobSize, metadata, indexKmsKey, indexEncContext);
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Write blob with its object metadata
      */
     @ExperimentalApi
     @Override
@@ -202,19 +243,31 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
         boolean failIfAlreadyExists,
         @Nullable Map<String, String> metadata
     ) throws IOException {
-        assert inputStream.markSupported() : "No mark support on inputStream breaks the S3 SDK's ability to retry requests";
-        SocketAccess.doPrivilegedIOException(() -> {
-            if (blobSize <= getLargeBlobThresholdInBytes()) {
-                executeSingleUpload(blobStore, buildKey(blobName), inputStream, blobSize, metadata);
-            } else {
-                executeMultipartUpload(blobStore, buildKey(blobName), inputStream, blobSize, metadata);
-            }
-            return null;
-        });
+        // Delegate to crypto-aware version with null CryptoMetadata
+        writeBlobWithMetadata(blobName, inputStream, blobSize, failIfAlreadyExists, metadata, null);
     }
 
     @Override
     public void asyncBlobUpload(WriteContext writeContext, ActionListener<Void> completionListener) throws IOException {
+        // Extract index-level SSE-KMS settings from WriteContext CryptoMetadata
+        String indexKmsKey = null;
+        String indexEncContext = null;
+        
+        org.opensearch.cluster.metadata.CryptoMetadata crypto = writeContext.getCryptoMetadata();
+        if (crypto != null && "aws-kms".equals(crypto.keyProviderType())) {
+            indexKmsKey = crypto.settings().get("kms.key_arn");
+            indexEncContext = crypto.settings().get("kms.encryption_context");
+            logger.info("[SSE-KMS-INDEX-ASYNC] Extracted from WriteContext CryptoMetadata: key={}, hasContext={}",
+                       indexKmsKey != null, indexEncContext != null);
+        }
+        
+        // MERGE encryption contexts: EncA (index) + EncB (repository)
+        // This ensures KMS grants work correctly with combined context
+        String finalEncContext = org.opensearch.repositories.s3.utils.SseKmsUtil.mergeAndEncodeEncryptionContexts(
+            indexEncContext,
+            blobStore.serverSideEncryptionEncryptionContext()
+        );
+        
         UploadRequest uploadRequest = new UploadRequest(
             blobStore.bucket(),
             buildKey(writeContext.getFileName()),
@@ -226,9 +279,9 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
             blobStore.isUploadRetryEnabled(),
             writeContext.getMetadata(),
             blobStore.serverSideEncryptionType(),
-            blobStore.serverSideEncryptionKmsKey(),
+            indexKmsKey != null ? indexKmsKey : blobStore.serverSideEncryptionKmsKey(),
             blobStore.serverSideEncryptionBucketKey(),
-            blobStore.serverSideEncryptionEncryptionContext(),
+            finalEncContext,
             blobStore.expectedBucketOwner()
         );
         try {
@@ -250,7 +303,9 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
                         uploadRequest.getKey(),
                         inputStream.getInputStream(),
                         uploadRequest.getContentLength(),
-                        uploadRequest.getMetadata()
+                        uploadRequest.getMetadata(),
+                        null,
+                        null
                     );
                     completionListener.onResponse(null);
                 } catch (Exception ex) {
@@ -536,8 +591,9 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
         final String blobName,
         final InputStream input,
         final long blobSize,
-        final Map<String, String> metadata
-    ) throws IOException {
+        final Map<String, String> metadata,
+        String indexKmsKey,
+        String indexEncContext) throws IOException {
 
         // Extra safety checks
         if (blobSize > MAX_FILE_SIZE.getBytes()) {
@@ -559,7 +615,8 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
         if (CollectionUtils.isNotEmpty(metadata)) {
             putObjectRequestBuilder = putObjectRequestBuilder.metadata(metadata);
         }
-        configureEncryptionSettings(putObjectRequestBuilder, blobStore);
+        // Use overloaded method with index encryption settings
+        configureEncryptionSettings(putObjectRequestBuilder, blobStore, indexKmsKey, indexEncContext);
 
         PutObjectRequest putObjectRequest = putObjectRequestBuilder.build();
         try (AmazonS3Reference clientReference = blobStore.clientReference()) {
@@ -585,8 +642,8 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
         final String blobName,
         final InputStream input,
         final long blobSize,
-        final Map<String, String> metadata
-    ) throws IOException {
+        final Map<String, String> metadata,
+        String indexKmsKey, String indexEncContext) throws IOException {
 
         ensureMultiPartUploadSize(blobSize);
         final long partSize = blobStore.bufferSizeInBytes();
@@ -616,7 +673,8 @@ class S3BlobContainer extends AbstractBlobContainer implements AsyncMultiStreamB
             createMultipartUploadRequestBuilder.metadata(metadata);
         }
 
-        configureEncryptionSettings(createMultipartUploadRequestBuilder, blobStore);
+        // Use overloaded method with index encryption settings
+        configureEncryptionSettings(createMultipartUploadRequestBuilder, blobStore, indexKmsKey, indexEncContext);
 
         final InputStream requestInputStream;
         if (blobStore.isUploadRetryEnabled()) {

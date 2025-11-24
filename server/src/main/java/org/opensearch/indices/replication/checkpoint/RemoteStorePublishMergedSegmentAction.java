@@ -148,6 +148,15 @@ public class RemoteStorePublishMergedSegmentAction extends AbstractPublishCheckp
             .stream()
             .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().length()));
         final CountDownLatch latch = new CountDownLatch(1);
+        
+        // Extract crypto metadata for merged segment upload
+        org.opensearch.cluster.metadata.IndexMetadata indexMetadata = indexShard.indexSettings().getIndexMetadata();
+        org.opensearch.cluster.metadata.CryptoMetadata cryptoMetadata = null;
+        if (indexMetadata != null) {
+            cryptoMetadata = org.opensearch.cluster.metadata.CryptoMetadata.fromIndexSettings(indexMetadata.getSettings());
+        }
+        logger.info("[CRYPTO] RemoteStorePublishMergedSegmentAction: uploadMergedSegments with hasCrypto={}", cryptoMetadata != null);
+        
         getRemoteStoreUploaderService(indexShard).uploadSegments(segmentsToUpload, segmentsSizeMap, new ActionListener<>() {
             @Override
             public void onResponse(Void unused) {
@@ -173,7 +182,7 @@ public class RemoteStorePublishMergedSegmentAction extends AbstractPublishCheckp
             public void onFailure(String file) {
                 logger.warn("Unable to upload segments during merge. Continuing.");
             }
-        }, true);
+        }, true, cryptoMetadata);
         try {
             long timeout = indexShard.getRecoverySettings().getMergedSegmentReplicationTimeout().seconds();
             if (latch.await(timeout, TimeUnit.SECONDS) == false) {

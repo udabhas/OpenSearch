@@ -95,8 +95,8 @@ public final class RemoteSnapshotDirectoryFactory implements IndexStorePlugin.Di
             // hence the blobContainer. We have used a dummy name as it plays no relevance in the blobPath generation.
             final BlobContainer blobContainer = blobStoreRepository.shardContainer(
                 new IndexId("DUMMY", indexId, pathType.getCode()),
-                shardId
-            );
+                shardId,
+                    null);
             final IndexShardSnapshot indexShardSnapshot = blobStoreRepository.loadShardSnapshot(blobContainer, snapshotId);
             assert indexShardSnapshot instanceof BlobStoreIndexShardSnapshot
                 : "indexShardSnapshot should be an instance of BlobStoreIndexShardSnapshot";

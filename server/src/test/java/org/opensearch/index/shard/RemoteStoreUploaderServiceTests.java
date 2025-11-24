@@ -192,7 +192,7 @@ public class RemoteStoreUploaderServiceTests extends OpenSearchTestCase {
             ActionListener<Void> callback = invocation.getArgument(5);
             callback.onResponse(null);
             return true;
-        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class));
+        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class), null);
 
         CountDownLatch latch = new CountDownLatch(1);
 
@@ -255,7 +255,7 @@ public class RemoteStoreUploaderServiceTests extends OpenSearchTestCase {
             ActionListener<Void> callback = invocation.getArgument(5);
             callback.onResponse(null);
             return true;
-        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class));
+        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class), null);
 
         CountDownLatch latch = new CountDownLatch(1);
 
@@ -321,7 +321,7 @@ public class RemoteStoreUploaderServiceTests extends OpenSearchTestCase {
             ActionListener<Void> callback = invocation.getArgument(5);
             callback.onResponse(null);
             return true;
-        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class));
+        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class), null);
 
         CountDownLatch latch = new CountDownLatch(1);
 
@@ -390,7 +390,7 @@ public class RemoteStoreUploaderServiceTests extends OpenSearchTestCase {
             ActionListener<Void> callback = invocation.getArgument(5);
             callback.onFailure(corruptException);
             return true;
-        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class));
+        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class), null);
 
         ActionListener<Void> listener = ActionListener.wrap(response -> fail("Should not succeed with corrupt index"), exception -> {
             assertEquals(corruptException, exception);
@@ -457,7 +457,7 @@ public class RemoteStoreUploaderServiceTests extends OpenSearchTestCase {
             ActionListener<Void> callback = invocation.getArgument(5);
             callback.onFailure(genericException);
             return true;
-        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class));
+        }).when(remoteDirectory).copyFrom(any(), any(), any(), any(), any(), any(), any(Boolean.class), null);
 
         ActionListener<Void> listener = ActionListener.wrap(response -> fail("Should not succeed with generic exception"), exception -> {
             assertEquals(genericException, exception);
