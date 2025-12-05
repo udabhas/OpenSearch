@@ -143,12 +143,10 @@ public class TranslogTransferManager {
     public boolean transferSnapshot(TransferSnapshot transferSnapshot, TranslogTransferListener translogTransferListener, CryptoMetadata cryptoMetadata)
         throws IOException {
         logger.info(
-            "[TRANSLOG-CRYPTO] TranslogTransferManager.transferSnapshot() - ENTRY: cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
-            cryptoMetadata != null ? "NOT-NULL" : "NULL",
-            cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
-            cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+            "[TRANSLOG-CRYPTO] TranslogTransferManager.transferSnapshot() - ENTRY: cryptoMetadata={}",
+            cryptoMetadata != null ? "NOT-NULL" : "NULL"
         );
-        
+
         List<Exception> exceptionList = new ArrayList<>(transferSnapshot.getTranslogTransferMetadata().getCount());
         Set<TransferFileSnapshot> toUpload = new HashSet<>(transferSnapshot.getTranslogTransferMetadata().getCount());
         long metadataBytesToUpload;

@@ -812,10 +812,8 @@ public class RemoteFsTranslog extends Translog {
 
         CryptoMetadata cryptoMetadata = CryptoMetadata.fromIndexSettings(indexMetadata.getSettings());
         logger.info(
-            "[TRANSLOG-CRYPTO] RemoteFsTranslog.resolveCryptoMetadata() - Resolved from index settings: cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
-            cryptoMetadata != null ? "NOT-NULL" : "NULL",
-            cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
-            cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+            "[TRANSLOG-CRYPTO] RemoteFsTranslog.resolveCryptoMetadata() - Resolved from index settings: cryptoMetadata={}",
+            cryptoMetadata != null ? "NOT-NULL" : "NULL"
         );
         return cryptoMetadata;
     }

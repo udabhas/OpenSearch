@@ -90,11 +90,9 @@ public class BlobStoreTransferService implements TransferService {
     public void uploadBlob(final TransferFileSnapshot fileSnapshot, Iterable<String> remoteTransferPath, WritePriority writePriority, CryptoMetadata cryptoMetadata)
         throws IOException {
         logger.info(
-            "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlob(sync) - Uploading {} with cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
+            "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlob(sync) - Uploading {} with cryptoMetadata={}",
             fileSnapshot.getName(),
-            cryptoMetadata != null ? "NOT-NULL" : "NULL",
-            cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
-            cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+            cryptoMetadata != null ? "NOT-NULL" : "NULL"
         );
         BlobPath blobPath = (BlobPath) remoteTransferPath;
         try (InputStream inputStream = fileSnapshot.inputStream()) {
