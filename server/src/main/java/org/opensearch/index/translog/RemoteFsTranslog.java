@@ -467,6 +467,14 @@ public class RemoteFsTranslog extends Translog {
 
             // resolve Index-level cryptoMetadata
             CryptoMetadata cryptoMetadata = resolveCryptoMetadata();
+            logger.info(
+                "[TRANSLOG-CRYPTO] RemoteFsTranslog.upload() - primaryTerm={}, generation={}, cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
+                primaryTerm,
+                generation,
+                cryptoMetadata != null ? "NOT-NULL" : "NULL",
+                cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
+                cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+            );
             return translogTransferManager.transferSnapshot(
                 transferSnapshotProvider,
                 new RemoteFsTranslogTransferListener(generation, primaryTerm, maxSeqNo, checkpoint.globalCheckpoint),
@@ -798,9 +806,17 @@ public class RemoteFsTranslog extends Translog {
         IndexMetadata indexMetadata = indexSettings.getIndexMetadata();
 
         if(indexMetadata == null) {
+            logger.info("[TRANSLOG-CRYPTO] RemoteFsTranslog.resolveCryptoMetadata() - indexMetadata is NULL, returning null");
             return null;
         }
 
-        return CryptoMetadata.fromIndexSettings(indexMetadata.getSettings());
+        CryptoMetadata cryptoMetadata = CryptoMetadata.fromIndexSettings(indexMetadata.getSettings());
+        logger.info(
+            "[TRANSLOG-CRYPTO] RemoteFsTranslog.resolveCryptoMetadata() - Resolved from index settings: cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
+            cryptoMetadata != null ? "NOT-NULL" : "NULL",
+            cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
+            cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+        );
+        return cryptoMetadata;
     }
 }

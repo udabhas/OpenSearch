@@ -142,6 +142,13 @@ public class TranslogTransferManager {
 
     public boolean transferSnapshot(TransferSnapshot transferSnapshot, TranslogTransferListener translogTransferListener, CryptoMetadata cryptoMetadata)
         throws IOException {
+        logger.info(
+            "[TRANSLOG-CRYPTO] TranslogTransferManager.transferSnapshot() - ENTRY: cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
+            cryptoMetadata != null ? "NOT-NULL" : "NULL",
+            cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
+            cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+        );
+        
         List<Exception> exceptionList = new ArrayList<>(transferSnapshot.getTranslogTransferMetadata().getCount());
         Set<TransferFileSnapshot> toUpload = new HashSet<>(transferSnapshot.getTranslogTransferMetadata().getCount());
         long metadataBytesToUpload;
@@ -194,6 +201,11 @@ public class TranslogTransferManager {
             // TODO: Ideally each file's upload start time should be when it is actually picked for upload
             // https://github.com/opensearch-project/OpenSearch/issues/9729
             fileTransferTracker.recordFileTransferStartTime(uploadStartTime);
+            logger.info(
+                "[TRANSLOG-CRYPTO] TranslogTransferManager.transferSnapshot() - Uploading {} translog files with cryptoMetadata={}",
+                toUpload.size(),
+                cryptoMetadata != null ? "NOT-NULL" : "NULL"
+            );
             transferService.uploadBlobs(toUpload, blobPathMap, latchedActionListener, WritePriority.HIGH, cryptoMetadata);
 
             try {
@@ -216,6 +228,11 @@ public class TranslogTransferManager {
                 remoteTranslogTransferTracker.addUploadBytesStarted(metadataBytesToUpload);
                 metadataUploadStartTime = System.nanoTime();
                 try {
+                    logger.info(
+                        "[TRANSLOG-CRYPTO] TranslogTransferManager.transferSnapshot() - Uploading metadata file {} with cryptoMetadata={}",
+                        tlogMetadata.getName(),
+                        cryptoMetadata != null ? "NOT-NULL" : "NULL"
+                    );
                     transferService.uploadBlob(tlogMetadata, remoteMetadataTransferPath, WritePriority.HIGH, cryptoMetadata);
                 } catch (Exception exception) {
                     remoteTranslogTransferTracker.addUploadTimeInMillis((System.nanoTime() - metadataUploadStartTime) / 1_000_000L);
