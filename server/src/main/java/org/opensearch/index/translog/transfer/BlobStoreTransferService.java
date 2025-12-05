@@ -237,11 +237,9 @@ public class BlobStoreTransferService implements TransferService {
         Map<String, String> metadata,
         CryptoMetadata cryptoMetadata) throws IOException {
         logger.info(
-            "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlobAsyncInternal() - Uploading {} with cryptoMetadata={}, kmsKeyId={}, encryptionContext={}, metadata={}",
+            "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlobAsyncInternal() - Uploading {} with cryptoMetadata={}, metadata={}",
             fileName,
             cryptoMetadata != null ? "NOT-NULL" : "NULL",
-            cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
-            cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A",
             metadata != null ? metadata.keySet() : "NULL"
         );
         BlobContainer blobContainer = blobStore.blobContainer(blobPath);

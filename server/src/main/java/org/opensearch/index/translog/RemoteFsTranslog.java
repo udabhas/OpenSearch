@@ -468,12 +468,10 @@ public class RemoteFsTranslog extends Translog {
             // resolve Index-level cryptoMetadata
             CryptoMetadata cryptoMetadata = resolveCryptoMetadata();
             logger.info(
-                "[TRANSLOG-CRYPTO] RemoteFsTranslog.upload() - primaryTerm={}, generation={}, cryptoMetadata={}, kmsKeyId={}, encryptionContext={}",
+                "[TRANSLOG-CRYPTO] RemoteFsTranslog.upload() - primaryTerm={}, generation={}, cryptoMetadata={}",
                 primaryTerm,
                 generation,
-                cryptoMetadata != null ? "NOT-NULL" : "NULL",
-                cryptoMetadata != null ? cryptoMetadata.kmsKeyId() : "N/A",
-                cryptoMetadata != null ? cryptoMetadata.encryptionContext() : "N/A"
+                cryptoMetadata != null ? "NOT-NULL" : "NULL"
             );
             return translogTransferManager.transferSnapshot(
                 transferSnapshotProvider,
