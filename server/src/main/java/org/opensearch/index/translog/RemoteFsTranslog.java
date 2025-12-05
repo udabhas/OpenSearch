@@ -802,11 +802,13 @@ public class RemoteFsTranslog extends Translog {
 
     private CryptoMetadata resolveCryptoMetadata() {
         IndexMetadata indexMetadata = indexSettings.getIndexMetadata();
-
+        logger.info("[TRANSLOG-CRYPTO]  ResolveCryptoMetadata with IndexMetadata = {}, indexSettings = {}", indexMetadata, indexSettings);
         if(indexMetadata == null) {
             logger.info("[TRANSLOG-CRYPTO] RemoteFsTranslog.resolveCryptoMetadata() - indexMetadata is NULL, returning null");
             return null;
         }
+
+        logger.info("[TRANSLOG-CRYPTO]  ResolveCryptoMetadata with IndexMetadata.getSettings = {}", indexMetadata.getSettings());
 
         CryptoMetadata cryptoMetadata = CryptoMetadata.fromIndexSettings(indexMetadata.getSettings());
         logger.info(
