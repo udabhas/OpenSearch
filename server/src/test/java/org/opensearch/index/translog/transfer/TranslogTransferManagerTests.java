@@ -150,14 +150,14 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             .uploadBlob(
                 any(TransferFileSnapshot.class),
                 Mockito.eq(remoteBaseTransferPath.add(String.valueOf(primaryTerm))),
-                any(WritePriority.class)
+                any(WritePriority.class),
             );
         doAnswer(invocationOnMock -> {
             ActionListener<TransferFileSnapshot> listener = (ActionListener<TransferFileSnapshot>) invocationOnMock.getArguments()[2];
             Set<TransferFileSnapshot> transferFileSnapshots = (Set<TransferFileSnapshot>) invocationOnMock.getArguments()[0];
             transferFileSnapshots.forEach(listener::onResponse);
             return null;
-        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class));
+        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class), null);
 
         FileTransferTracker fileTransferTracker = new FileTransferTracker(
             new ShardId("index", "indexUUid", 0),
@@ -198,7 +198,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             public void onUploadFailed(TransferSnapshot transferSnapshot, Exception ex) {
                 translogTransferFailed.incrementAndGet();
             }
-        }));
+        }, null));
         assertEquals(4, fileTransferSucceeded.get());
         assertEquals(0, fileTransferFailed.get());
         assertEquals(1, translogTransferSucceeded.get());
@@ -225,7 +225,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             listener.onFailure(testException);
             transferFileSnapshots.stream().skip(1).forEach(listener::onResponse);
             return null;
-        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class));
+        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class), null);
 
         FileTransferTracker fileTransferTracker = new FileTransferTracker(
             new ShardId("index", "indexUUid", 0),
@@ -267,7 +267,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
                 translogTransferFailed.incrementAndGet();
                 exception.set(ex);
             }
-        }));
+        }, null));
 
         assertNotNull(exception.get());
         assertTrue(exception.get() instanceof TranslogUploadFailedException);
@@ -297,7 +297,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             Thread t = new Thread(runnable);
             t.start();
             return null;
-        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class));
+        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class), null);
         FileTransferTracker fileTransferTracker = new FileTransferTracker(
             new ShardId("index", "indexUUid", 0),
             remoteTranslogTransferTracker
@@ -323,7 +323,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             public void onUploadFailed(TransferSnapshot transferSnapshot, Exception ex) {
                 exception.set(ex);
             }
-        });
+        }, null);
         assertNotNull(exception.get());
         assertTrue(exception.get() instanceof TranslogUploadFailedException);
         assertEquals("Timed out waiting for transfer of snapshot test-to-string to complete", exception.get().getMessage());
@@ -343,7 +343,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             }));
             uploadThread.get().start();
             return null;
-        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class));
+        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class), null);
         FileTransferTracker fileTransferTracker = new FileTransferTracker(
             new ShardId("index", "indexUUid", 0),
             remoteTranslogTransferTracker
@@ -370,7 +370,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
                     public void onUploadFailed(TransferSnapshot transferSnapshot, Exception ex) {
                         exception.set(ex);
                     }
-                });
+                }, null);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -733,7 +733,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             .uploadBlob(
                 any(TransferFileSnapshot.class),
                 Mockito.eq(remoteBaseTransferPath.add(String.valueOf(primaryTerm))),
-                any(WritePriority.class)
+                any(WritePriority.class),
             );
         doAnswer(invocationOnMock -> {
             ActionListener<TransferFileSnapshot> listener = (ActionListener<TransferFileSnapshot>) invocationOnMock.getArguments()[2];
@@ -743,7 +743,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
                 listener.onResponse(transferFileSnapshot);
             });
             return null;
-        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class));
+        }).when(transferService).uploadBlobs(anySet(), anyMap(), any(ActionListener.class), any(WritePriority.class), null);
 
         FileTransferTracker fileTransferTracker = new FileTransferTracker(
             new ShardId("index", "indexUUid", 0),
@@ -784,7 +784,7 @@ public class TranslogTransferManagerTests extends OpenSearchTestCase {
             public void onUploadFailed(TransferSnapshot transferSnapshot, Exception ex) {
                 translogTransferFailed.incrementAndGet();
             }
-        }));
+        }, null));
         assertEquals(2, fileTransferSucceeded.get());
         assertEquals(0, fileTransferFailed.get());
         assertEquals(1, translogTransferSucceeded.get());

@@ -89,7 +89,7 @@ public class BlobStoreTransferServiceTests extends OpenSearchTestCase {
             null
         );
         TransferService transferService = new BlobStoreTransferService(repository.blobStore(), threadPool);
-        transferService.uploadBlob(transferFileSnapshot, repository.basePath(), WritePriority.HIGH);
+        transferService.uploadBlob(transferFileSnapshot, repository.basePath(), WritePriority.HIGH, );
     }
 
     public void testUploadBlobFromByteArray() throws IOException {
@@ -99,7 +99,7 @@ public class BlobStoreTransferServiceTests extends OpenSearchTestCase {
             1
         );
         TransferService transferService = new BlobStoreTransferService(repository.blobStore(), threadPool);
-        transferService.uploadBlob(transferFileSnapshot, repository.basePath(), WritePriority.NORMAL);
+        transferService.uploadBlob(transferFileSnapshot, repository.basePath(), WritePriority.NORMAL, );
     }
 
     public void testUploadBlobAsync() throws IOException, InterruptedException {
@@ -130,7 +130,7 @@ public class BlobStoreTransferServiceTests extends OpenSearchTestCase {
                     throw new AssertionError("Failed to perform uploadBlobAsync", e);
                 }
             }, latch),
-            WritePriority.HIGH
+            WritePriority.HIGH,
         );
         assertTrue(latch.await(1000, TimeUnit.MILLISECONDS));
         assertTrue(succeeded.get());
@@ -162,8 +162,8 @@ public class BlobStoreTransferServiceTests extends OpenSearchTestCase {
             inputStreamCaptor.capture(),
             Mockito.anyLong(),
             Mockito.any(),
-            Mockito.any()
-        );
+            Mockito.any(),
+                null);
         RemoteTransferContainer.OffsetRangeInputStreamSupplier inputStreamSupplier = inputStreamCaptor.getValue();
         OffsetRangeInputStream inputStream1 = inputStreamSupplier.get(1, 0);
         OffsetRangeInputStream inputStream2 = inputStreamSupplier.get(1, 2);

@@ -9,6 +9,8 @@
 package org.opensearch.index.translog;
 
 import org.apache.logging.log4j.Logger;
+import org.opensearch.cluster.metadata.CryptoMetadata;
+import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.SetOnce;
 import org.opensearch.common.blobstore.BlobPath;
@@ -462,10 +464,13 @@ public class RemoteFsTranslog extends Translog {
             ).build()
         ) {
             Checkpoint checkpoint = current.getLastSyncedCheckpoint();
+
+            // resolve Index-level cryptoMetadata
+            CryptoMetadata cryptoMetadata = resolveCryptoMetadata();
             return translogTransferManager.transferSnapshot(
                 transferSnapshotProvider,
-                new RemoteFsTranslogTransferListener(generation, primaryTerm, maxSeqNo, checkpoint.globalCheckpoint)
-            );
+                new RemoteFsTranslogTransferListener(generation, primaryTerm, maxSeqNo, checkpoint.globalCheckpoint),
+                cryptoMetadata);
         } finally {
             syncPermit.release(SYNC_PERMIT);
         }
@@ -787,5 +792,15 @@ public class RemoteFsTranslog extends Translog {
             return false;
         }
         return readers.size() >= maxRemoteTlogReaders;
+    }
+
+    private CryptoMetadata resolveCryptoMetadata() {
+        IndexMetadata indexMetadata = indexSettings.getIndexMetadata();
+
+        if(indexMetadata == null) {
+            return null;
+        }
+
+        return CryptoMetadata.fromIndexSettings(indexMetadata.getSettings());
     }
 }

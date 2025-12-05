@@ -13,6 +13,7 @@ import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.OutputStreamIndexOutput;
 import org.opensearch.action.LatchedActionListener;
+import org.opensearch.cluster.metadata.CryptoMetadata;
 import org.opensearch.common.SetOnce;
 import org.opensearch.common.blobstore.BlobMetadata;
 import org.opensearch.common.blobstore.BlobPath;
@@ -52,8 +53,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.opensearch.index.translog.transfer.FileSnapshot.TransferFileSnapshot;
-import static org.opensearch.index.translog.transfer.FileSnapshot.TranslogFileSnapshot;
 import static org.opensearch.index.translog.transfer.TranslogTransferMetadata.METADATA_SEPARATOR;
 
 /**
@@ -141,7 +140,7 @@ public class TranslogTransferManager {
         return result;
     }
 
-    public boolean transferSnapshot(TransferSnapshot transferSnapshot, TranslogTransferListener translogTransferListener)
+    public boolean transferSnapshot(TransferSnapshot transferSnapshot, TranslogTransferListener translogTransferListener, CryptoMetadata cryptoMetadata)
         throws IOException {
         List<Exception> exceptionList = new ArrayList<>(transferSnapshot.getTranslogTransferMetadata().getCount());
         Set<TransferFileSnapshot> toUpload = new HashSet<>(transferSnapshot.getTranslogTransferMetadata().getCount());
@@ -195,7 +194,7 @@ public class TranslogTransferManager {
             // TODO: Ideally each file's upload start time should be when it is actually picked for upload
             // https://github.com/opensearch-project/OpenSearch/issues/9729
             fileTransferTracker.recordFileTransferStartTime(uploadStartTime);
-            transferService.uploadBlobs(toUpload, blobPathMap, latchedActionListener, WritePriority.HIGH);
+            transferService.uploadBlobs(toUpload, blobPathMap, latchedActionListener, WritePriority.HIGH, cryptoMetadata);
 
             try {
                 if (latch.await(remoteStoreSettings.getClusterRemoteTranslogTransferTimeout().millis(), TimeUnit.MILLISECONDS) == false) {
@@ -217,7 +216,7 @@ public class TranslogTransferManager {
                 remoteTranslogTransferTracker.addUploadBytesStarted(metadataBytesToUpload);
                 metadataUploadStartTime = System.nanoTime();
                 try {
-                    transferService.uploadBlob(tlogMetadata, remoteMetadataTransferPath, WritePriority.HIGH);
+                    transferService.uploadBlob(tlogMetadata, remoteMetadataTransferPath, WritePriority.HIGH, cryptoMetadata);
                 } catch (Exception exception) {
                     remoteTranslogTransferTracker.addUploadTimeInMillis((System.nanoTime() - metadataUploadStartTime) / 1_000_000L);
                     remoteTranslogTransferTracker.addUploadBytesFailed(metadataBytesToUpload);

@@ -13,6 +13,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.lucene.store.IndexInput;
 import org.opensearch.action.ActionRunnable;
+import org.opensearch.cluster.metadata.CryptoMetadata;
 import org.opensearch.common.annotation.ExperimentalApi;
 import org.opensearch.common.blobstore.AsyncMultiStreamBlobContainer;
 import org.opensearch.common.blobstore.BlobContainer;
@@ -70,13 +71,13 @@ public class BlobStoreTransferService implements TransferService {
         final TransferFileSnapshot fileSnapshot,
         Iterable<String> remoteTransferPath,
         ActionListener<TransferFileSnapshot> listener,
-        WritePriority writePriority
-    ) {
+        WritePriority writePriority,
+        CryptoMetadata cryptoMetadata) {
         assert remoteTransferPath instanceof BlobPath;
         BlobPath blobPath = (BlobPath) remoteTransferPath;
         threadPool.executor(threadPoolName).execute(ActionRunnable.wrap(listener, l -> {
             try {
-                uploadBlob(fileSnapshot, blobPath, writePriority);
+                uploadBlob(fileSnapshot, blobPath, writePriority, cryptoMetadata);
                 l.onResponse(fileSnapshot);
             } catch (Exception e) {
                 logger.error(() -> new ParameterizedMessage("Failed to upload blob {}", fileSnapshot.getName()), e);
@@ -86,11 +87,11 @@ public class BlobStoreTransferService implements TransferService {
     }
 
     @Override
-    public void uploadBlob(final TransferFileSnapshot fileSnapshot, Iterable<String> remoteTransferPath, WritePriority writePriority)
+    public void uploadBlob(final TransferFileSnapshot fileSnapshot, Iterable<String> remoteTransferPath, WritePriority writePriority, CryptoMetadata cryptoMetadata)
         throws IOException {
         BlobPath blobPath = (BlobPath) remoteTransferPath;
         try (InputStream inputStream = fileSnapshot.inputStream()) {
-            blobStore.blobContainer(blobPath).writeBlobAtomic(fileSnapshot.getName(), inputStream, fileSnapshot.getContentLength(), true);
+            blobStore.blobContainer(blobPath).writeBlobWithMetadata(fileSnapshot.getName(), inputStream, fileSnapshot.getContentLength(), true,null, cryptoMetadata);
         }
     }
 
@@ -99,14 +100,14 @@ public class BlobStoreTransferService implements TransferService {
         Set<TransferFileSnapshot> fileSnapshots,
         final Map<Long, BlobPath> blobPaths,
         ActionListener<TransferFileSnapshot> listener,
-        WritePriority writePriority
-    ) {
+        WritePriority writePriority,
+        CryptoMetadata cryptoMetadata) {
         fileSnapshots.forEach(fileSnapshot -> {
             BlobPath blobPath = blobPaths.get(fileSnapshot.getPrimaryTerm());
             if (!(blobStore.blobContainer(blobPath) instanceof AsyncMultiStreamBlobContainer)) {
-                uploadBlob(ThreadPool.Names.TRANSLOG_TRANSFER, fileSnapshot, blobPath, listener, writePriority);
+                uploadBlob(ThreadPool.Names.TRANSLOG_TRANSFER, fileSnapshot, blobPath, listener, writePriority, cryptoMetadata);
             } else {
-                uploadBlob(fileSnapshot, listener, blobPath, writePriority);
+                uploadBlob(fileSnapshot, listener, blobPath, writePriority, cryptoMetadata);
             }
         });
 
@@ -140,8 +141,8 @@ public class BlobStoreTransferService implements TransferService {
             (size, position) -> new OffsetRangeIndexInputStream(new ByteArrayIndexInput(resourceDescription, bytes), size, position),
             expectedChecksum,
             listener,
-            null
-        );
+            null,
+            null);
     }
 
     // Builds a metadata map containing the Base64-encoded checkpoint file data associated with a translog file.
@@ -172,8 +173,8 @@ public class BlobStoreTransferService implements TransferService {
         TransferFileSnapshot fileSnapshot,
         ActionListener<TransferFileSnapshot> listener,
         BlobPath blobPath,
-        WritePriority writePriority
-    ) {
+        WritePriority writePriority,
+        CryptoMetadata cryptoMetadata) {
 
         try {
             ChannelFactory channelFactory = FileChannel::open;
@@ -202,8 +203,8 @@ public class BlobStoreTransferService implements TransferService {
                 (size, position) -> new OffsetRangeFileInputStream(fileSnapshot.getPath(), size, position),
                 fileSnapshot.getChecksum(),
                 completionListener,
-                metadata
-            );
+                metadata,
+                cryptoMetadata);
 
         } catch (Exception e) {
             logger.error(() -> new ParameterizedMessage("Failed to upload blob {}", fileSnapshot.getName()), e);
@@ -228,8 +229,8 @@ public class BlobStoreTransferService implements TransferService {
         RemoteTransferContainer.OffsetRangeInputStreamSupplier inputStreamSupplier,
         Long expectedChecksum,
         ActionListener<Void> completionListener,
-        Map<String, String> metadata
-    ) throws IOException {
+        Map<String, String> metadata,
+        CryptoMetadata cryptoMetadata) throws IOException {
         BlobContainer blobContainer = blobStore.blobContainer(blobPath);
         assert blobContainer instanceof AsyncMultiStreamBlobContainer;
         boolean remoteIntegrityEnabled = ((AsyncMultiStreamBlobContainer) blobContainer).remoteIntegrityCheckSupported();
@@ -243,7 +244,8 @@ public class BlobStoreTransferService implements TransferService {
                 inputStreamSupplier,
                 expectedChecksum,
                 remoteIntegrityEnabled,
-                metadata
+                metadata,
+                cryptoMetadata
             )
         ) {
             ((AsyncMultiStreamBlobContainer) blobContainer).asyncBlobUpload(
