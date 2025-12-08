@@ -488,10 +488,7 @@ public class TranslogTransferManager {
     }
 
     private TransferFileSnapshot prepareMetadata(TransferSnapshot transferSnapshot) throws IOException {
-        Map<String, String> generationPrimaryTermMap = transferSnapshot.getTranslogFileSnapshots().stream().map(s -> {
-            assert s instanceof TranslogFileSnapshot;
-            return (TranslogFileSnapshot) s;
-        })
+        Map<String, String> generationPrimaryTermMap = transferSnapshot.getTranslogFileSnapshots().stream()
             .collect(
                 Collectors.toMap(
                     snapshot -> String.valueOf(snapshot.getGeneration()),
