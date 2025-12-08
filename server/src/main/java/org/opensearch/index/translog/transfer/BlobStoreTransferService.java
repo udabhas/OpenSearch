@@ -26,6 +26,9 @@ import org.opensearch.common.blobstore.transfer.RemoteTransferContainer;
 import org.opensearch.common.blobstore.transfer.stream.OffsetRangeFileInputStream;
 import org.opensearch.common.blobstore.transfer.stream.OffsetRangeIndexInputStream;
 import org.opensearch.common.lucene.store.ByteArrayIndexInput;
+import org.opensearch.common.lucene.store.InputStreamIndexInput;
+
+import java.io.UncheckedIOException;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.store.exception.ChecksumCombinationException;
 import org.opensearch.index.translog.ChannelFactory;
@@ -182,16 +185,18 @@ public class BlobStoreTransferService implements TransferService {
         CryptoMetadata cryptoMetadata) {
 
         try {
-            ChannelFactory channelFactory = FileChannel::open;
             Map<String, String> metadata = null;
             if (fileSnapshot.getMetadataFileInputStream() != null) {
                 metadata = buildTransferFileMetadata(fileSnapshot.getMetadataFileInputStream());
             }
 
-            long contentLength;
-            try (FileChannel channel = channelFactory.open(fileSnapshot.getPath(), StandardOpenOption.READ)) {
-                contentLength = channel.size();
+            // Read content once using inputStream() to invoke any overrides (e.g., decryption)
+            byte[] fileContent;
+            try (InputStream inputStream = fileSnapshot.inputStream()) {
+                fileContent = inputStream.readAllBytes();
             }
+            long contentLength = fileContent.length;
+            
             ActionListener<Void> completionListener = ActionListener.wrap(resp -> listener.onResponse(fileSnapshot), ex -> {
                 logger.error(() -> new ParameterizedMessage("Failed to upload blob {}", fileSnapshot.getName()), ex);
                 listener.onFailure(new FileTransferException(fileSnapshot, ex));
@@ -199,13 +204,20 @@ public class BlobStoreTransferService implements TransferService {
 
             // Only the first generation doesn't have checksum
             assert (fileSnapshot.getChecksum() != null || fileSnapshot.getName().contains("-1."));
+            
+            // Use ByteArrayIndexInput for async upload with the content from inputStream()
+            String resourceDesc = "FileSnapshot[" + fileSnapshot.getName() + "]";
             uploadBlobAsyncInternal(
                 fileSnapshot.getName(),
                 fileSnapshot.getName(),
                 contentLength,
                 blobPath,
                 writePriority,
-                (size, position) -> new OffsetRangeFileInputStream(fileSnapshot.getPath(), size, position),
+                (size, position) -> new OffsetRangeIndexInputStream(
+                    new ByteArrayIndexInput(resourceDesc, fileContent), 
+                    size, 
+                    position
+                ),
                 fileSnapshot.getChecksum(),
                 completionListener,
                 metadata,

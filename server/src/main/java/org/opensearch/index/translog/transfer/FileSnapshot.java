@@ -160,7 +160,7 @@ public class FileSnapshot implements Closeable {
      *
      * @opensearch.internal
      */
-    public static final class TranslogFileSnapshot extends TransferFileSnapshot {
+    public static class TranslogFileSnapshot extends TransferFileSnapshot {
 
         private final long generation;
 
