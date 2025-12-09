@@ -392,7 +392,7 @@ public class RemoteFsTranslog extends Translog {
         prepareAndUpload(primaryTermSupplier.getAsLong(), null);
     }
 
-    private boolean prepareAndUpload(Long primaryTerm, Long generation) throws IOException {
+    protected boolean prepareAndUpload(Long primaryTerm, Long generation) throws IOException {
         // During primary relocation, both the old and new primary have engine created with RemoteFsTranslog and having
         // ReplicationTracker.primaryMode() as true. However, before we perform the `internal:index/shard/replication/segments_sync`
         // action which re-downloads the segments and translog on the new primary. We are ensuring 2 things here -
