@@ -92,11 +92,6 @@ public class BlobStoreTransferService implements TransferService {
     @Override
     public void uploadBlob(final TransferFileSnapshot fileSnapshot, Iterable<String> remoteTransferPath, WritePriority writePriority, CryptoMetadata cryptoMetadata)
         throws IOException {
-        logger.info(
-            "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlob(sync) - Uploading {} with cryptoMetadata={}",
-            fileSnapshot.getName(),
-            cryptoMetadata != null ? "NOT-NULL" : "NULL"
-        );
         BlobPath blobPath = (BlobPath) remoteTransferPath;
         try (InputStream inputStream = fileSnapshot.inputStream()) {
             blobStore.blobContainer(blobPath).writeBlobWithMetadata(fileSnapshot.getName(), inputStream, fileSnapshot.getContentLength(), true,null, cryptoMetadata);
@@ -248,12 +243,6 @@ public class BlobStoreTransferService implements TransferService {
         ActionListener<Void> completionListener,
         Map<String, String> metadata,
         CryptoMetadata cryptoMetadata) throws IOException {
-        logger.info(
-            "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlobAsyncInternal() - Uploading {} with cryptoMetadata={}, metadata={}",
-            fileName,
-            cryptoMetadata != null ? "NOT-NULL" : "NULL",
-            metadata != null ? metadata.keySet() : "NULL"
-        );
         BlobContainer blobContainer = blobStore.blobContainer(blobPath);
         assert blobContainer instanceof AsyncMultiStreamBlobContainer;
         boolean remoteIntegrityEnabled = ((AsyncMultiStreamBlobContainer) blobContainer).remoteIntegrityCheckSupported();
@@ -271,10 +260,6 @@ public class BlobStoreTransferService implements TransferService {
                 cryptoMetadata
             )
         ) {
-            logger.info(
-                "[TRANSLOG-CRYPTO] BlobStoreTransferService.uploadBlobAsyncInternal() - Created RemoteTransferContainer for {} - starting async upload",
-                fileName
-            );
             ((AsyncMultiStreamBlobContainer) blobContainer).asyncBlobUpload(
                 remoteTransferContainer.createWriteContext(),
                 completionListener
