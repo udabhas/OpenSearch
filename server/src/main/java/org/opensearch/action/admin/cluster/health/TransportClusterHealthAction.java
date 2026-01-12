@@ -279,6 +279,7 @@ public class TransportClusterHealthAction extends TransportClusterManagerNodeRea
         final Predicate<ClusterState> validationPredicate = newState -> validateRequest(request, newState, waitCount);
         if (validationPredicate.test(currentState)) {
             ClusterHealthResponse clusterHealthResponse = getResponse(request, currentState, waitCount, TimeoutState.OK);
+            ClusterHealthCacheHook.runCacheCleanup();
             if (request.ensureNodeWeighedIn()) {
                 if (clusterHealthResponse.hasDiscoveredClusterManager() == false) {
                     listener.onFailure(new ClusterManagerNotDiscoveredException("cluster-manager not discovered"));
