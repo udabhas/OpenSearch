@@ -2873,6 +2873,7 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
                 if (shardRouting.primary()) {
                     if (indexSettings.isRemoteTranslogStoreEnabled()) {
                         if (syncFromRemote) {
+                            logger.info("ILE DEBUG innerOpenEngineAndTranslog: about to syncRemoteTranslogAndUpdateGlobalCheckpoint");
                             syncRemoteTranslogAndUpdateGlobalCheckpoint();
                         } else if (isSnapshotV2Restore() == false) {
                             // we will enter this block when we do not want to recover from remote translog.
@@ -2902,7 +2903,9 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
                 }
             }
             // we must create a new engine under mutex (see IndexShard#snapshotStoreMetadata).
+            logger.info("ILE DEBUG innerOpenEngineAndTranslog: about to newReadWriteEngine, engineFactory={}, translogFactory={}", engineFactory.getClass().getName(), config.getTranslogFactory().getClass().getName());
             final Engine newEngine = engineFactory.newReadWriteEngine(config);
+            logger.info("ILE DEBUG innerOpenEngineAndTranslog: engine created, engine={}", newEngine.getClass().getName());
             onNewEngine(newEngine);
             currentEngineReference.set(newEngine);
 
@@ -5419,6 +5422,8 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
 
     public void syncTranslogFilesFromRemoteTranslog() throws IOException {
         TranslogFactory translogFactory = translogFactorySupplier.apply(indexSettings, shardRouting);
+        logger.info("ILE DEBUG syncTranslogFilesFromRemoteTranslog: translogFactory={}, isSSEEnabled={}, translogPath={}", translogFactory.getClass().getName(), RemoteStoreUtils.isServerSideEncryptionEnabledIndex(indexSettings.getIndexMetadata()), shardPath().resolveTranslog());
+        logger.info("ILE DEBUG syncTranslogFilesFromRemoteTranslog stack trace", new Exception("ILE DEBUG stack trace"));
         assert translogFactory instanceof RemoteBlobStoreInternalTranslogFactory;
         Repository repository = ((RemoteBlobStoreInternalTranslogFactory) translogFactory).getRepository();
         syncTranslogFilesFromGivenRemoteTranslog(

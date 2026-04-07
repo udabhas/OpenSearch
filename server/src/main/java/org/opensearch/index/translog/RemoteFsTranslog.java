@@ -126,6 +126,7 @@ public class RemoteFsTranslog extends Translog {
             channelFactory
         );
         logger = Loggers.getLogger(getClass(), shardId);
+        logger.info("ILE DEBUG RemoteFsTranslog constructor: channelFactory={}, isServerSideEncryptionEnabled={}, downloadRemoteTranslogOnInit={}", channelFactory.getClass().getName(), isServerSideEncryptionEnabled, config.downloadRemoteTranslogOnInit());
         this.startedPrimarySupplier = startedPrimarySupplier;
         this.remoteTranslogTransferTracker = remoteTranslogTransferTracker;
         fileTransferTracker = new FileTransferTracker(shardId, remoteTranslogTransferTracker);
@@ -467,6 +468,7 @@ public class RemoteFsTranslog extends Translog {
 
             // resolve Index-level cryptoMetadata
             CryptoMetadata cryptoMetadata = resolveCryptoMetadata();
+            logger.info("ILE DEBUG upload: translogTransferManager={}, primaryTerm={}, generation={}, readers={}", translogTransferManager.getClass().getName(), primaryTerm, generation, readers.size());
             return translogTransferManager.transferSnapshot(
                 transferSnapshotProvider,
                 new RemoteFsTranslogTransferListener(generation, primaryTerm, maxSeqNo, checkpoint.globalCheckpoint),

@@ -648,6 +648,7 @@ final class StoreRecovery {
     }
 
     private void recoverFromRemoteStore(IndexShard indexShard) throws IndexShardRecoveryException {
+        logger.info("ILE DEBUG recoverFromRemoteStore: storeType={}", indexShard.indexSettings().getSettings().get("index.store.type"));
         final Store remoteStore = indexShard.remoteStore();
         if (remoteStore == null) {
             throw new IndexShardRecoveryException(
@@ -663,7 +664,9 @@ final class StoreRecovery {
         remoteStore.incRef();
         try {
             // Download segments from remote segment store
+            logger.info("ILE DEBUG recoverFromRemoteStore: about to syncSegmentsFromRemoteSegmentStore");
             indexShard.syncSegmentsFromRemoteSegmentStore(true);
+            logger.info("ILE DEBUG recoverFromRemoteStore: about to syncTranslogFilesFromRemoteTranslog");
             indexShard.syncTranslogFilesFromRemoteTranslog();
 
             // On index creation, the only segment file that is created is segments_N. We can safely discard this file
@@ -680,6 +683,7 @@ final class StoreRecovery {
 
             assert indexShard.shardRouting.primary() : "only primary shards can recover from store";
             indexShard.recoveryState().getIndex().setFileDetailsComplete();
+            logger.info("ILE DEBUG recoverFromRemoteStore: about to openEngineAndRecoverFromTranslog");
             indexShard.openEngineAndRecoverFromTranslog();
             indexShard.getEngine().fillSeqNoGaps(indexShard.getPendingPrimaryTerm());
             indexShard.finalizeRecovery();
