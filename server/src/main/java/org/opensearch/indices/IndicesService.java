@@ -563,7 +563,10 @@ public class IndicesService extends AbstractLifecycleComponent
         this.bigArrays = bigArrays;
         this.scriptService = scriptService;
         this.clusterService = clusterService;
-        if (FeatureFlags.isEnabled(FeatureFlags.WRITABLE_WARM_INDEX_EXPERIMENTAL_FLAG)) {
+        // ILE TEST HACK (local, do not upstream): force the stored-fields prefetch settings supplier on
+        // regardless of the writable_warm feature flag, so IndexInput.prefetch() is exercised on local
+        // cryptofs search for benchmarking. Original gated on WRITABLE_WARM_INDEX_EXPERIMENTAL_FLAG.
+        if (true) {
             final TieredStoragePrefetchSettings prefetchSettings = new TieredStoragePrefetchSettings(clusterService.getClusterSettings());
             this.tieredStoragePrefetchSettingsSupplier = () -> prefetchSettings;
         } else {
@@ -1192,10 +1195,14 @@ public class IndicesService extends AbstractLifecycleComponent
         }
         pluginsService.onIndexModule(indexModule);
         // Add tiered storage search listeners
+        // ILE TEST HACK (local, do not upstream): register StoredFieldsPrefetch unconditionally so the
+        // Lucene stored-fields prefetch path (IndexInput.prefetch) fires on local cryptofs search for
+        // benchmarking. TieredStorageSearchSlowLog stays flag-gated (irrelevant to prefetch). Original
+        // gated the whole block on WRITABLE_WARM_INDEX_EXPERIMENTAL_FLAG.
         if (FeatureFlags.isEnabled(FeatureFlags.WRITABLE_WARM_INDEX_EXPERIMENTAL_FLAG)) {
             indexModule.addSearchOperationListener(new TieredStorageSearchSlowLog(idxSettings));
-            indexModule.addSearchOperationListener(new StoredFieldsPrefetch(tieredStoragePrefetchSettingsSupplier));
         }
+        indexModule.addSearchOperationListener(new StoredFieldsPrefetch(tieredStoragePrefetchSettingsSupplier));
         for (IndexEventListener listener : builtInListeners) {
             indexModule.addIndexEventListener(listener);
         }
