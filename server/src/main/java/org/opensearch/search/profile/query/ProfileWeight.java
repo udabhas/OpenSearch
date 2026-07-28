@@ -62,6 +62,14 @@ public final class ProfileWeight extends Weight {
         this.profile = profile;
     }
 
+    /**
+     * Exposes the per-query profile breakdown so profiling-aware components can access the current
+     * leaf's metric set (used to set {@link org.opensearch.search.profile.ProfileBreakdownHolder}).
+     */
+    public ContextualProfileBreakdown getProfile() {
+        return profile;
+    }
+
     @Override
     public ScorerSupplier scorerSupplier(LeafReaderContext context) throws IOException {
         Timer timer = profile.context(context).getTimer(QueryTimingType.BUILD_SCORER);

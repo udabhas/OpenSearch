@@ -353,6 +353,9 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
             cancellable.checkCancelled();
             if (weight instanceof ProfileWeight profileWeight) {
                 profileWeight.associateCollectorToLeaves(ctx, collector);
+                // Expose this leaf's profile breakdown to profiling-aware components (e.g. storage
+                // plugins) for the duration of scoring this leaf. Cleared in the finally below.
+                org.opensearch.search.profile.ProfileBreakdownHolder.set(profileWeight.getProfile().context(ctx));
             }
             weight = wrapWeight(weight);
             // See please https://github.com/apache/lucene/pull/964
@@ -367,6 +370,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
             return;
         }
         // catch early terminated exception and rethrow?
+        try {
         Bits liveDocs = ctx.reader().getLiveDocs();
         BitSet liveDocsBitSet = getSparseBitSetOrNull(liveDocs);
         if (liveDocsBitSet == null) {
@@ -420,6 +424,9 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
         // Note: this is called if collection ran successfully, including the above special cases of
         // CollectionTerminatedException and TimeExceededException, but no other exception.
         leafCollector.finish();
+        } finally {
+            org.opensearch.search.profile.ProfileBreakdownHolder.clear();
+        }
     }
 
     void sendBatch(List<InternalAggregation> batch) {
