@@ -57,6 +57,7 @@ import org.opensearch.common.util.concurrent.ConcurrentCollections;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.core.index.Index;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.index.fielddata.FielddataLoadContext;
 import org.opensearch.index.fielddata.IndexFieldData;
 import org.opensearch.index.fielddata.IndexFieldDataCache;
 import org.opensearch.index.fielddata.LeafFieldData;
@@ -342,7 +343,16 @@ public class IndicesFieldDataCache implements RemovalListener<IndicesFieldDataCa
                 cacheHelper.addClosedListener(IndexFieldCache.this);
                 k.listeners.add(nodeListener);
                 Collections.addAll(k.listeners, perShardListeners);
-                final LeafFieldData fieldData = indexFieldData.loadDirect(context);
+                final LeafFieldData fieldData;
+                // Mark the thread for the duration of the uninversion so a Directory can tell this
+                // high-volume, zero-reuse read apart from the query phase that follows it. Cleared in
+                // finally: search threads are pooled, and a leaked marker would affect the next request.
+                FielddataLoadContext.markFielddataLoad();
+                try {
+                    fieldData = indexFieldData.loadDirect(context);
+                } finally {
+                    FielddataLoadContext.clearFielddataLoad();
+                }
                 notifyOnCache(shardId, fieldData);
                 return fieldData;
             });
