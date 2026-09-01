@@ -12,6 +12,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.store.DataAccessHint;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.ArrayUtil;
@@ -48,6 +49,15 @@ import java.util.function.IntSupplier;
  * // TODO: make this package-private after combining recovery and replication into single package.
  */
 public final class SegmentFileTransferHandler {
+
+    /**
+     * Context for phase-1 file copy opens: DEFAULT with a SEQUENTIAL access hint.
+     *
+     * <p>Hoisted so every file in a transfer shares one instance and the intent is stated once. Deliberately
+     * not {@link IOContext#READONCE}: that also carries {@code ReadOnceHint}, which makes MMapDirectory confine
+     * the input to the opening thread - a promise this copy cannot make.
+     */
+    private static final IOContext SEQUENTIAL_COPY_CONTEXT = IOContext.DEFAULT.withHints(DataAccessHint.SEQUENTIAL);
 
     private final Logger logger;
     private final IndexShard shard;
@@ -105,12 +115,22 @@ public final class SegmentFileTransferHandler {
             protected void onNewResource(StoreFileMetadata md) throws IOException {
                 offset = 0;
                 IOUtils.close(currentInput, () -> currentInput = null);
-                // Open all files other than Segments* using IOContext.READ.
-                // With Lucene9_12 a READONCE context will confine the underlying IndexInput (MemorySegmentIndexInput) to a single thread.
+                // Open all files other than Segments* with a SEQUENTIAL access hint, which is what this copy
+                // actually does: nextChunkRequest walks each file once, front to back, and never re-reads it
+                // (offset only ever advances, and getNextRequest is serialised by the AsyncIOProcessor, so
+                // maxConcurrentChunks parallelises the SEND, not the read).
+                //
+                // The hint carries that intent without READONCE's side effect: MMapDirectory confines an input
+                // to a single thread only when the context contains ReadOnceHint, and this copy cannot promise
+                // that - the open happens on whichever thread drains the processor queue. Impls that ignore
+                // hints are unaffected: MMapDirectory's read-advice function ignores the context unless
+                // setReadAdvice(ADVISE_BY_CONTEXT) is installed, which nothing does, and BufferedIndexInput
+                // sizes its buffer from Context, not hints.
+                //
                 // Segments* files require IOContext.READONCE
                 // https://github.com/apache/lucene/blob/b2d3a2b37e00f19a74949097736be8fd64745f61/lucene/test-framework/src/java/org/apache/lucene/tests/store/MockDirectoryWrapper.java#L817
                 if (md.name().startsWith(IndexFileNames.SEGMENTS) == false) {
-                    final IndexInput indexInput = store.directory().openInput(md.name(), IOContext.DEFAULT);
+                    final IndexInput indexInput = store.directory().openInput(md.name(), SEQUENTIAL_COPY_CONTEXT);
                     currentInput = new InputStreamIndexInput(indexInput, md.length()) {
                         @Override
                         public void close() throws IOException {
