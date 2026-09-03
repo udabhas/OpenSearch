@@ -11,6 +11,7 @@ package org.opensearch.index.shard;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.store.DataAccessHint;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
@@ -33,6 +34,23 @@ import java.util.function.Function;
  * ensuring efficient and reliable segment synchronization while providing comprehensive monitoring and error handling.
  */
 public class RemoteStoreUploaderService implements RemoteStoreUploader {
+
+    /**
+     * Context for the segment-upload reads. Every file is streamed to the remote store exactly once,
+     * forwards-only, and never re-read, so the access pattern is declared with
+     * {@link DataAccessHint#SEQUENTIAL} rather than left as the bare {@link IOContext#DEFAULT} (whose
+     * implied advice is RANDOM).
+     *
+     * <p>Deliberately NOT {@link IOContext#READONCE}: multipart upload clones/slices this input once per
+     * part, and both {@code RemoteDirectory.uploadBlob} and {@code DataFormatAwareRemoteDirectory.uploadBlob}
+     * assert against a READONCE context for exactly that reason. A hinted DEFAULT is neither reference- nor
+     * value-equal to READONCE, so those assertions still hold.
+     *
+     * <p>Inert for the stock store types — nothing in the server reads {@code hints()}, and
+     * {@code MMapDirectory}'s read-advice function is not installed by {@code FsDirectoryFactory} — so this
+     * is a no-op unless a directory implementation opts in to consuming the hint.
+     */
+    private static final IOContext SEQUENTIAL_UPLOAD_CONTEXT = IOContext.DEFAULT.withHints(DataAccessHint.SEQUENTIAL);
 
     private final Logger logger;
 
@@ -118,7 +136,7 @@ public class RemoteStoreUploaderService implements RemoteStoreUploader {
             remoteDirectory.copyFrom(
                 storeDirectory,
                 localSegment,
-                IOContext.DEFAULT,
+                SEQUENTIAL_UPLOAD_CONTEXT,
                 aggregatedListener,
                 isLowPriorityUpload,
                 cryptoMetadata
